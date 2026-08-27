@@ -11,7 +11,7 @@
  * out under each slider so "4" means the same thing on item 3 and item 33.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -250,47 +250,67 @@ export function Grader({
     [adopt],
   );
 
+  // Both effects below fetch on mount / on item change and flip a spinner flag
+  // as they start. `react-hooks/set-state-in-effect` objects to that first
+  // synchronous setState, but this is the "subscribe to an external system"
+  // case the rule exempts in spirit: the request is the external system, and
+  // the flag has to go up before the await or the buttons stay live during it.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 
   // Generate the sample the first time an item is seen, then cache it forever
   // (spec §7) — a human grade only means anything next to the exact output the
   // human read, and the judge is later compared against that same artifact.
-  useEffect(() => {
-    if (!item || item.sample || generating) return;
-    let cancelled = false;
+  //
+  // Which request is in flight is tracked in a ref, never in state that the
+  // effect also depends on: an effect that depends on the `generating` flag it
+  // sets tears itself down mid-request (cleanup runs, the response lands on a
+  // cancelled closure) and the screen hangs on every uncached item. The ref is
+  // keyed by item id, so a re-render — or React's development double-invoke —
+  // costs nothing while a genuinely new item still gets its own request.
+  const requestedFor = useRef<string | null>(null);
 
-    (async () => {
-      setGenerating(true);
-      setError(null);
-      try {
-        const res = await fetch("/api/evals/grade", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "generate", itemId: item.itemId }),
-        });
-        if (cancelled) return;
-        if (!res.ok) {
-          setError(await parseError(res));
-          return;
-        }
-        const body = (await res.json()) as ApiResponse;
-        if (!cancelled) {
-          setProgress(body.progress);
-          setItem(body.item);
-        }
-      } catch {
-        if (!cancelled) setError("Couldn't generate a sample for this item.");
-      } finally {
-        if (!cancelled) setGenerating(false);
+  const generateSample = useCallback(async (target: GradeItemPayload) => {
+    if (requestedFor.current === target.itemId) return;
+    requestedFor.current = target.itemId;
+    setGenerating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/evals/grade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate", itemId: target.itemId }),
+      });
+      // A newer item took over while this was in flight: drop the answer and
+      // leave the spinner to whoever owns it now.
+      if (requestedFor.current !== target.itemId) return;
+      if (!res.ok) {
+        // Clear the key so the owner can retry this item without a reload.
+        requestedFor.current = null;
+        setError(await parseError(res));
+        return;
       }
-    })();
+      const body = (await res.json()) as ApiResponse;
+      setProgress(body.progress);
+      setItem(body.item);
+    } catch {
+      if (requestedFor.current !== target.itemId) return;
+      requestedFor.current = null;
+      setError("Couldn't generate a sample for this item.");
+    } finally {
+      if (requestedFor.current === target.itemId || requestedFor.current === null) {
+        setGenerating(false);
+      }
+    }
+  }, []);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [item, generating]);
+  useEffect(() => {
+    if (!item || item.sample) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void generateSample(item);
+  }, [item, generateSample]);
 
   async function saveAndNext() {
     if (!item) return;
@@ -420,7 +440,18 @@ export function Grader({
             ) : item.sample ? (
               <BulletList item={item} />
             ) : (
-              <p className="text-sm text-muted-foreground">No sample yet.</p>
+              <div className="flex flex-col items-start gap-2">
+                <p className="text-sm text-muted-foreground">
+                  No sample yet for this item.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void generateSample(item)}
+                >
+                  Generate sample
+                </Button>
+              </div>
             )}
           </section>
 

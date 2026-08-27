@@ -174,7 +174,9 @@ export default async function EvalsPage() {
                   <th className="px-3 py-2 text-left font-medium">Date</th>
                   <th className="px-3 py-2 text-left font-medium">Step</th>
                   <th className="px-3 py-2 text-left font-medium">Model</th>
-                  <th className="px-3 py-2 text-right font-medium">n</th>
+                  <th className="px-3 py-2 text-right font-medium" title="Items scored (of items attempted)">
+                    n
+                  </th>
                   <th className="px-3 py-2 text-right font-medium">Mean</th>
                   <th className="px-3 py-2 text-right font-medium">Halluc.</th>
                   <th className="px-3 py-2 text-right font-medium">κ</th>
@@ -200,6 +202,16 @@ export default async function EvalsPage() {
                       <td className="px-3 py-2 font-mono text-xs">{run.modelId}</td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {run.itemCount ?? "—"}
+                        {run.failedItems ? (
+                          // n is the *scored* count; without this a 40-item run
+                          // where 37 items errored looks like a clean 3-item run.
+                          <div
+                            className="text-[10px] font-normal text-destructive"
+                            title={`${run.failedItems} of ${run.itemsAttempted ?? "?"} items failed and were not scored`}
+                          >
+                            {run.failedItems} failed
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums font-medium">
                         {fmt(run.meanScore)}

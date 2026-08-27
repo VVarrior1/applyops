@@ -80,6 +80,24 @@ describe("summarizeRows", () => {
     expect(stats.p95Ms).toBeCloseTo(1925, 6);
   });
 
+  it("leaves an item with no measured latency out of the percentile sample", () => {
+    const stats = summarizeRows([
+      row({ itemId: "a", latencyMs: 1000 }),
+      row({ itemId: "b", latencyMs: 2000 }),
+      // No latency reported — absent from the sample, not a 0 ms item, which
+      // would otherwise drag p50 down to 1000 and flatter the run.
+      row({ itemId: "c", latencyMs: null }),
+    ]);
+    expect(stats.p50Ms).toBe(1500);
+    expect(stats.p95Ms).toBeCloseTo(1950, 6);
+  });
+
+  it("reports 0 ms percentiles when no item measured a latency", () => {
+    const stats = summarizeRows([row({ itemId: "a", latencyMs: null })]);
+    expect(stats.p50Ms).toBe(0);
+    expect(stats.p95Ms).toBe(0);
+  });
+
   it("survives a run in which every item failed", () => {
     const stats = summarizeRows([
       row({ itemId: "a", error: "boom", meanScore: null, judgeScores: null, totalClaims: 0 }),

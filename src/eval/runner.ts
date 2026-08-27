@@ -286,7 +286,11 @@ export function summarizeRows(rows: readonly EvalResultRow[]): {
   gradedItems: number;
 } {
   const scored = rows.filter((row) => row.meanScore != null && !row.error);
-  const latencies = scored.map((row) => row.latencyMs ?? 0);
+  // An item whose step call reported no latency is absent from the sample, not
+  // a 0 ms item: coercing it would drag p50/p95 down and quietly flatter the run.
+  const latencies = scored
+    .map((row) => row.latencyMs)
+    .filter((value): value is number => value != null);
   const totalClaims = scored.reduce((sum, row) => sum + row.totalClaims, 0);
   const unsupported = scored.reduce((sum, row) => sum + row.hallucinationCount, 0);
 
@@ -407,6 +411,11 @@ export async function runEval(db: Db, args: RunEvalArgs): Promise<EvalRunSummary
     cost_usd: stats.costUsd,
     p50_ms: stats.p50Ms,
     p95_ms: stats.p95Ms,
+    // `item_count` is overwritten below with the *scored* count, so the two
+    // numbers that say how much of the set actually ran live here — otherwise a
+    // 40-item run where 37 items errored reads exactly like a clean 3-item one.
+    items_attempted: stats.n + stats.failedItems,
+    failed_items: stats.failedItems,
     ci95: vsBaseline
       ? {
           diff: vsBaseline.diff,
@@ -474,6 +483,8 @@ export interface EvalRunListItem {
   gitSha: string | null;
   createdAt: Date;
   itemCount: number | null;
+  itemsAttempted: number | null;
+  failedItems: number | null;
   meanScore: number | null;
   hallucinationRate: number | null;
   kappa: number | null;
@@ -514,6 +525,8 @@ export async function listEvalRuns(db: Db, limit = 50): Promise<EvalRunListItem[
       cost_usd: number;
       p50_ms: number;
       p95_ms: number;
+      items_attempted: number;
+      failed_items: number;
       ci95: { diff?: number; lo?: number; hi?: number; baseline_run_id?: string };
     }>;
     const ci = metrics.ci95;
@@ -526,6 +539,8 @@ export async function listEvalRuns(db: Db, limit = 50): Promise<EvalRunListItem[
       gitSha: row.gitSha,
       createdAt: row.createdAt,
       itemCount: row.itemCount,
+      itemsAttempted: metrics.items_attempted ?? null,
+      failedItems: metrics.failed_items ?? null,
       meanScore: metrics.mean_score ?? null,
       hallucinationRate: metrics.hallucination_rate ?? null,
       kappa: metrics.kappa ?? null,
