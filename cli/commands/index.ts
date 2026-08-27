@@ -1,10 +1,9 @@
 import type { Command } from "commander";
+import { register as registerOutcome } from "./outcome";
 
 /**
  * Each CLI command lives in its own file and exports `register(program)`.
  * Add ONE line here per command; keep the list alphabetical to minimise merge
  * conflicts between parallel tasks.
  */
-export const registrars: Array<(program: Command) => void> = [
-  // (tasks append here, e.g.)  registerScrape,
-];
+export const registrars: Array<(program: Command) => void> = [registerOutcome];
