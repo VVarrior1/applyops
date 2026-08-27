@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { COUNTRY_OPTIONS } from "@/src/finders/country";
 import type { SearchPrefsRow, SavePrefsInput } from "@/src/profile/facts";
 
 const ROLE_OPTIONS = [
@@ -144,6 +145,11 @@ export function PrefsForm({
 }) {
   const [roles, setRoles] = useState<string[]>(initialPrefs?.roles ?? []);
   const [locations, setLocations] = useState<string[]>(initialPrefs?.locations ?? []);
+  // Defaults to CA/US for a user with no saved prefs yet — matches the
+  // `search_prefs.countries` column default (src/db/schema.ts) so a brand
+  // new account's ranking/filtering behaves the same before and after their
+  // first explicit save.
+  const [countries, setCountries] = useState<string[]>(initialPrefs?.countries ?? ["CA", "US"]);
   const [remote, setRemote] = useState<string>(initialPrefs?.remote ?? "any");
   const [seniority, setSeniority] = useState<string[]>(initialPrefs?.seniority ?? []);
   const [workAuth, setWorkAuth] = useState<string>(initialPrefs?.workAuth ?? NO_WORK_AUTH_VALUE);
@@ -167,6 +173,7 @@ export function PrefsForm({
     const payload: SavePrefsInput = {
       roles,
       locations,
+      countries,
       remote,
       seniority,
       workAuth: workAuth === NO_WORK_AUTH_VALUE ? null : workAuth,
@@ -211,6 +218,31 @@ export function PrefsForm({
       <div className="flex flex-col gap-1.5">
         <Label>Locations</Label>
         <ChipList values={locations} onChange={setLocations} placeholder="Add a city or region, press Enter" />
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label>Countries you&apos;ll work in</Label>
+        <div className="flex flex-wrap gap-1.5">
+          {COUNTRY_OPTIONS.map((option) => {
+            const active = countries.includes(option.code);
+            return (
+              <Button
+                key={option.code}
+                type="button"
+                size="sm"
+                variant={active ? "default" : "outline"}
+                title={option.name}
+                onClick={() => toggle(countries, setCountries, option.code)}
+              >
+                {option.code}
+              </Button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Remote roles restricted to a country you haven&apos;t picked are filtered out. Leave all
+          unselected to allow anywhere.
+        </p>
       </div>
 
       <div className="flex flex-col gap-1.5">

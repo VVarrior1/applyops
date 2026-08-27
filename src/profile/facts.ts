@@ -295,6 +295,8 @@ export interface SavePrefsInput {
   workAuth?: string | null;
   keywords?: string[];
   excludedCompanies?: string[];
+  /** ISO-3166 alpha-2 codes the user will work in; [] = anywhere. */
+  countries?: string[];
 }
 
 /** The user's search prefs row, or `null` if they haven't saved any yet. */
@@ -322,6 +324,10 @@ export async function upsertPrefs(
     workAuth: prefs.workAuth ?? null,
     keywords: prefs.keywords ?? [],
     excludedCompanies: prefs.excludedCompanies ?? [],
+    // Mirrors the column default: a caller that omits this entirely (an
+    // older client not yet aware of countries) keeps the same "CA, US"
+    // starting point a brand-new row would get, not a silent "anywhere".
+    countries: prefs.countries ?? ["CA", "US"],
   };
   const [row] = await db
     .insert(searchPrefs)

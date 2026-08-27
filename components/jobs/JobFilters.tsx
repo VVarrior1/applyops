@@ -6,6 +6,10 @@ export interface JobFiltersValue {
   remote: "any" | "remote" | "onsite";
   workAuth: string;
   vendor: string;
+  /** "my" (default, the user's prefs.countries), "any", "unknown", or one of `userCountries`' codes. */
+  country: string;
+  /** "worth" (default, hide skip-verdict rows) or "all". */
+  verdict: "worth" | "all";
 }
 
 const WORK_AUTH_OPTIONS: { value: string; label: string }[] = [
@@ -34,13 +38,20 @@ const SELECT_CLASSES =
 
 /**
  * `/jobs`'s filter bar (plan Task 8 Step 3: min score, remote, work-auth,
- * vendor). A plain `method="GET"` form with native form controls — no
- * client JS, same "the URL is the state" approach the `/funnel` page's
- * group-by toggle already uses, just with more fields than a handful of
- * links can express cleanly. `/jobs/page.tsx` reads the resulting
- * `searchParams` and does the actual filtering server-side.
+ * vendor; plus country and verdict). A plain `method="GET"` form with
+ * native form controls — no client JS, same "the URL is the state" approach
+ * the `/funnel` page's group-by toggle already uses, just with more fields
+ * than a handful of links can express cleanly. `/jobs/page.tsx` reads the
+ * resulting `searchParams` and does the actual filtering server-side.
  */
-export function JobFilters({ value }: { value: JobFiltersValue }) {
+export function JobFilters({
+  value,
+  userCountries,
+}: {
+  value: JobFiltersValue;
+  /** The signed-in user's `prefs.countries`, resolved to names — populates the per-country options. */
+  userCountries: { code: string; name: string }[];
+}) {
   return (
     <form
       method="GET"
@@ -97,6 +108,32 @@ export function JobFilters({ value }: { value: JobFiltersValue }) {
               {opt.label}
             </option>
           ))}
+        </select>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="country" className="text-xs text-muted-foreground">
+          Country
+        </label>
+        <select id="country" name="country" defaultValue={value.country} className={SELECT_CLASSES}>
+          <option value="my">My countries (default)</option>
+          <option value="any">Any country</option>
+          <option value="unknown">Unknown only</option>
+          {userCountries.map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.name} ({c.code}) only
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="verdict" className="text-xs text-muted-foreground">
+          Verdict
+        </label>
+        <select id="verdict" name="verdict" defaultValue={value.verdict} className={SELECT_CLASSES}>
+          <option value="worth">Worth applying (hide skip)</option>
+          <option value="all">All, incl. skip</option>
         </select>
       </div>
 

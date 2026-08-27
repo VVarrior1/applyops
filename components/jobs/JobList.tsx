@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,8 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
+import { VerdictBadge } from "@/components/jobs/VerdictBadge";
+import type { Verdict } from "@/src/rank/verdict";
 
 export interface JobListItem {
   id: string;
@@ -27,6 +29,11 @@ export interface JobListItem {
   /** The score actually shown — `fit-v1` when it exists, else `keyword-v1`, else null. */
   score: number | null;
   scoreKind: "fit" | "keyword" | null;
+  /** ISO-3166 alpha-2 codes detected from the location; [] = unknown/anywhere. */
+  countries: string[];
+  verdict: Verdict;
+  /** Hard blockers first, then soft caveats — see src/rank/verdict.ts. */
+  reasons: string[];
 }
 
 const WORK_AUTH_LABEL: Record<string, string> = {
@@ -60,11 +67,32 @@ async function parseErrorBody(res: Response): Promise<string> {
  * with neither shows a dash and sorts last (the page does the sorting;
  * this component only renders the order it's given).
  */
-export function JobList({ jobs }: { jobs: JobListItem[] }) {
+export function JobList({
+  jobs,
+  skippedCount,
+  verdictFilter,
+}: {
+  jobs: JobListItem[];
+  /** Count of skip-verdict rows in the fetched page, whether or not they're currently shown. */
+  skippedCount: number;
+  verdictFilter: "worth" | "all";
+}) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [ranking, setRanking] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Preserves every other filter while flipping just `verdict` — "hide
+  // skips" (the default) has no `verdict` param at all, so toggling back to
+  // it means deleting the key rather than writing "worth" explicitly.
+  const toggleVerdictHref = (() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (verdictFilter === "worth") params.set("verdict", "all");
+    else params.delete("verdict");
+    const qs = params.toString();
+    return qs ? `/jobs?${qs}` : "/jobs";
+  })();
 
   async function handleRankMore() {
     setRanking(true);
@@ -96,7 +124,19 @@ export function JobList({ jobs }: { jobs: JobListItem[] }) {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          {jobs.length} job{jobs.length === 1 ? "" : "s"} matching your filters.
+          {jobs.length} job{jobs.length === 1 ? "" : "s"}
+          {skippedCount > 0 && (
+            <>
+              {" "}
+              · {skippedCount} {verdictFilter === "worth" ? "hidden as skip" : "skipped (shown)"}{" "}
+              <Link
+                href={toggleVerdictHref}
+                className="underline underline-offset-2 hover:text-foreground"
+              >
+                {verdictFilter === "worth" ? "show skipped" : "hide skipped"}
+              </Link>
+            </>
+          )}
         </p>
         <Button onClick={handleRankMore} disabled={ranking} size="sm">
           {ranking ? "Ranking…" : "Rank more"}
@@ -108,6 +148,7 @@ export function JobList({ jobs }: { jobs: JobListItem[] }) {
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead>Verdict</TableHead>
             <TableHead>Score</TableHead>
             <TableHead>Title</TableHead>
             <TableHead>Company</TableHead>
@@ -119,13 +160,23 @@ export function JobList({ jobs }: { jobs: JobListItem[] }) {
         <TableBody>
           {jobs.length === 0 && (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground">
+              <TableCell colSpan={7} className="text-center text-muted-foreground">
                 No jobs match these filters yet. Try “Rank more” or widen the filters.
               </TableCell>
             </TableRow>
           )}
           {jobs.map((job) => (
             <TableRow key={job.id}>
+              <TableCell title={job.reasons.join("\n")}>
+                <div className="flex flex-col gap-0.5">
+                  <VerdictBadge verdict={job.verdict} reasons={job.reasons} />
+                  {job.reasons[0] && (
+                    <span className="max-w-40 truncate text-[11px] text-muted-foreground">
+                      {job.reasons[0]}
+                    </span>
+                  )}
+                </div>
+              </TableCell>
               <TableCell>
                 {job.score === null ? (
                   <span className="text-muted-foreground">—</span>
@@ -145,7 +196,14 @@ export function JobList({ jobs }: { jobs: JobListItem[] }) {
               </TableCell>
               <TableCell>{job.companyName ?? "—"}</TableCell>
               <TableCell className="max-w-48 truncate text-muted-foreground">
-                {job.location ?? (job.remote ? "Remote" : "—")}
+                <span className="inline-flex items-center gap-1.5">
+                  {job.location ?? (job.remote ? "Remote" : "—")}
+                  {job.countries.length > 0 && (
+                    <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
+                      {job.countries.join(", ")}
+                    </Badge>
+                  )}
+                </span>
               </TableCell>
               <TableCell>
                 {job.workAuthSignal && WORK_AUTH_LABEL[job.workAuthSignal] ? (

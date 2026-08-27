@@ -21,6 +21,7 @@
 import { and, asc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { companies, jobs } from "../db/schema";
+import { detectCountries } from "./country";
 import { detectWorkAuth, isEntryLevel, isRelevantRole } from "./filters";
 import { ashbyFinder } from "./ashby";
 import { greenhouseFinder } from "./greenhouse";
@@ -301,12 +302,13 @@ async function upsertJobs(
 
   const values = [...byUrl.values()].map((job) => {
     const description = sanitizeText(job.description ?? "", MAX_DESCRIPTION_CHARS);
+    const location = job.location === null ? null : sanitizeText(job.location, 500);
     return {
       companyId,
       externalId: job.externalId,
       url: job.url,
       title: sanitizeText(job.title, 500),
-      location: job.location === null ? null : sanitizeText(job.location, 500),
+      location,
       remote: job.remote,
       description,
       postedAt: job.postedAt,
@@ -316,6 +318,7 @@ async function upsertJobs(
       isEntryLevel: isEntryLevel(job.title, description),
       isRelevantRole: isRelevantRole(job.title),
       workAuthSignal: detectWorkAuth(`${job.location ?? ""} ${description}`),
+      countries: detectCountries(location, description),
     };
   });
 
@@ -341,6 +344,7 @@ async function upsertJobs(
           isEntryLevel: sql`excluded.is_entry_level`,
           isRelevantRole: sql`excluded.is_relevant_role`,
           workAuthSignal: sql`excluded.work_auth_signal`,
+          countries: sql`excluded.countries`,
           // `scraped_at`, `analysis` and `analysis_generation_id` are
           // deliberately absent: first-seen time and a paid-for analysis must
           // survive a re-scrape.

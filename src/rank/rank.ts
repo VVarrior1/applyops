@@ -31,6 +31,7 @@ import type { ModelId } from "../llm/model-id";
 import { runAnalyze, runFit } from "../pipeline/steps";
 import type { AnalyzeOutput, Fact, FitOutput } from "../pipeline/schemas";
 import { getConfirmedFacts, getPrefs, type SearchPrefsRow } from "../profile/facts";
+import { candidateConditions } from "./candidates";
 import { keywordScore } from "./keyword";
 
 /** `job_scores.ranker_version` for the free, deterministic baseline. */
@@ -128,6 +129,7 @@ async function selectCandidateJobs(
         eq(jobs.isEntryLevel, true),
         eq(jobs.isRelevantRole, true),
         isNull(jobScores.id),
+        ...candidateConditions(prefs),
       ),
     )
     // Newest first (spec §6); NULLS LAST because a chunk of postings carry

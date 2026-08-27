@@ -3,15 +3,31 @@ import { and, eq, inArray } from "drizzle-orm";
 import { format } from "date-fns";
 import { requireUser } from "@/src/auth/require";
 import { getDb } from "@/src/db/client";
-import { companies, jobs, jobScores } from "@/src/db/schema";
+import { applications, companies, jobs, jobScores } from "@/src/db/schema";
 import { DEFAULT_MODEL_BY_STEP } from "@/src/llm/defaults";
 import type { FitOutput } from "@/src/pipeline/schemas";
+import { getPrefs, type SearchPrefsRow } from "@/src/profile/facts";
 import { fitRankerVersion, KEYWORD_RANKER_VERSION } from "@/src/rank/rank";
+import { assessJob, type VerdictInput } from "@/src/rank/verdict";
 import { FitTab } from "@/components/jobs/FitTab";
 import { PostingTab } from "@/components/jobs/PostingTab";
 import { SuggestionsTab } from "@/components/jobs/SuggestionsTab";
 import { TailorTab } from "@/components/jobs/TailorTab";
+import { VerdictBadge } from "@/components/jobs/VerdictBadge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+type VerdictPrefs = NonNullable<VerdictInput["prefs"]>;
+
+/** `search_prefs` (untyped `text` columns) → `assessJob`'s narrow prefs union — same shape/rationale as `app/(app)/jobs/page.tsx`'s `toVerdictPrefs`. */
+function toVerdictPrefs(prefs: SearchPrefsRow | null): VerdictPrefs | null {
+  if (!prefs) return null;
+  return {
+    countries: prefs.countries ?? null,
+    workAuth: prefs.workAuth as VerdictPrefs["workAuth"],
+    remote: prefs.remote as VerdictPrefs["remote"],
+    locations: prefs.locations ?? null,
+  };
+}
 
 /**
  * `/jobs/[id]` — plan Task 8 Step 3: tabs Posting · Fit · Tailor ·
@@ -50,6 +66,12 @@ export default async function JobDetailPage({
       analysis: jobs.analysis,
       postedAt: jobs.postedAt,
       scrapedAt: jobs.scrapedAt,
+      lastSeenAt: jobs.lastSeenAt,
+      active: jobs.active,
+      isEntryLevel: jobs.isEntryLevel,
+      isRelevantRole: jobs.isRelevantRole,
+      workAuthSignal: jobs.workAuthSignal,
+      countries: jobs.countries,
     })
     .from(jobs)
     .leftJoin(companies, eq(jobs.companyId, companies.id))
@@ -63,22 +85,30 @@ export default async function JobDetailPage({
   const analysis = jobRow.analysis;
 
   const fitVersion = fitRankerVersion(DEFAULT_MODEL_BY_STEP.fit);
-  const scoreRows = await db
-    .select({
-      rankerVersion: jobScores.rankerVersion,
-      score: jobScores.score,
-      matched: jobScores.matched,
-      gaps: jobScores.gaps,
-      rationale: jobScores.rationale,
-    })
-    .from(jobScores)
-    .where(
-      and(
-        eq(jobScores.jobId, jobRow.id),
-        eq(jobScores.userId, user.id),
-        inArray(jobScores.rankerVersion, [fitVersion, KEYWORD_RANKER_VERSION]),
+  const [scoreRows, prefs, appliedRows] = await Promise.all([
+    db
+      .select({
+        rankerVersion: jobScores.rankerVersion,
+        score: jobScores.score,
+        matched: jobScores.matched,
+        gaps: jobScores.gaps,
+        rationale: jobScores.rationale,
+      })
+      .from(jobScores)
+      .where(
+        and(
+          eq(jobScores.jobId, jobRow.id),
+          eq(jobScores.userId, user.id),
+          inArray(jobScores.rankerVersion, [fitVersion, KEYWORD_RANKER_VERSION]),
+        ),
       ),
-    );
+    getPrefs(db, user.id),
+    db
+      .select({ id: applications.id })
+      .from(applications)
+      .where(and(eq(applications.userId, user.id), eq(applications.jobId, jobRow.id)))
+      .limit(1),
+  ]);
 
   const fitRow = scoreRows.find((row) => row.rankerVersion === fitVersion);
   const keywordRow = scoreRows.find((row) => row.rankerVersion === KEYWORD_RANKER_VERSION);
@@ -91,11 +121,46 @@ export default async function JobDetailPage({
       }
     : null;
 
+  const { verdict, reasons } = assessJob({
+    job: {
+      title: jobRow.title,
+      remote: jobRow.remote,
+      countries: jobRow.countries,
+      postedAt: jobRow.postedAt,
+      lastSeenAt: jobRow.lastSeenAt,
+      active: jobRow.active,
+      isEntryLevel: jobRow.isEntryLevel,
+      isRelevantRole: jobRow.isRelevantRole,
+      workAuthSignal: jobRow.workAuthSignal,
+      location: jobRow.location,
+    },
+    analysis,
+    fitScore: fitRow?.score ?? null,
+    prefs: toVerdictPrefs(prefs),
+    alreadyApplied: appliedRows.length > 0,
+  });
+
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-xl font-semibold">{jobRow.title}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{jobRow.companyName ?? "Unknown company"}</p>
+      </div>
+
+      <div className="flex flex-col gap-2 rounded-lg border bg-card p-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">Is this worth applying to?</span>
+          <VerdictBadge verdict={verdict} reasons={reasons} />
+        </div>
+        {reasons.length > 0 ? (
+          <ul className="list-inside list-disc text-sm text-muted-foreground">
+            {reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">No caveats — go for it.</p>
+        )}
       </div>
 
       <Tabs defaultValue="posting">
