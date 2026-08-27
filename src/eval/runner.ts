@@ -60,6 +60,14 @@ export interface EvalResultRow {
   unsupportedClaims: UnsupportedClaim[];
   /** Every model call attributable to this item (analyze + tailor + judge). */
   costUsd: number;
+  /**
+   * Cost of the *step under test* alone, excluding the cached analysis and the
+   * judge. Optional because it was added after the first runs were recorded.
+   * The benchmark (`src/bench/bench.ts`) reports $/item from this: a judge fee
+   * that is identical for every contestant would otherwise flatten the very
+   * price difference the benchmark exists to show.
+   */
+  stepCostUsd?: number;
   /** Latency of the step under test only — what p50/p95 report. */
   latencyMs: number | null;
   error: string | null;
@@ -98,6 +106,16 @@ export interface EvalRunSummary {
 
 export interface RunEvalArgs {
   step: Step;
+  /**
+   * Which step's golden set to load. Defaults to {@link RunEvalArgs.step}.
+   *
+   * Spec §7 keeps one set of 40 `eval_items` — recorded under `tailor` — and
+   * *reuses* it for `fit`/`suggest`; the benchmark reuses it for `analyze`
+   * too. The run is still recorded under `step`, which is what was measured.
+   */
+  itemStep?: Step;
+  /** Override how one item is scored. See {@link ItemEvaluator}. */
+  evaluator?: ItemEvaluator;
   /** The model under test. Defaults to the step's default model. */
   modelId?: ModelId;
   /** Restrict the run to these `eval_items.id`s. */
@@ -149,6 +167,34 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+/** What an {@link ItemEvaluator} is told about the run it is scoring for. */
+export interface EvalItemContext {
+  /** The model under test. */
+  modelId: ModelId;
+  /** The grader. Fixed for a run (spec §7). */
+  judgeModelId: ModelId;
+  /** Whose budget pays; `null` = owner CLI, budget bypassed. */
+  userId: string | null;
+}
+
+/**
+ * How one golden item is turned into a scored row.
+ *
+ * The default is {@link tailorEvaluator} — the `tailor` pipeline the eval
+ * harness was written for. The seam exists for the model benchmark (spec §8),
+ * which grades `analyze`/`fit`/`suggest` with step-specific judge rubrics
+ * (`src/bench/bench.ts`); everything downstream of the row — persistence,
+ * baseline comparison, metrics — is identical, so only this piece varies.
+ *
+ * An evaluator must never throw: a provider error belongs in `row.error`, so
+ * one bad posting cannot abort a 40-item run.
+ */
+export type ItemEvaluator = (
+  db: Db,
+  item: GoldenItem,
+  ctx: EvalItemContext,
+) => Promise<EvalResultRow>;
+
 /**
  * Score one item end to end. Never throws: a provider error becomes a row with
  * `error` set, so one bad posting cannot abort a 40-item run.
@@ -178,6 +224,7 @@ async function evaluateItem(
     hallucinationCount: 0,
     unsupportedClaims: [],
     costUsd: 0,
+    stepCostUsd: 0,
     latencyMs: null,
     error: null,
   };
@@ -197,6 +244,7 @@ async function evaluateItem(
     });
     base.generationId = tailored.generationId;
     base.costUsd += tailored.costUsd;
+    base.stepCostUsd = tailored.costUsd;
     base.latencyMs = tailored.latencyMs;
 
     // The mechanical check runs against the item's *frozen* labels, not the
@@ -226,6 +274,9 @@ async function evaluateItem(
 
   return base;
 }
+
+/** The built-in evaluator: the `tailor` pipeline (spec §7). */
+export const tailorEvaluator: ItemEvaluator = evaluateItem;
 
 /** The most recent `baseline = true` run for this step, if there is one. */
 async function findBaselineRun(
@@ -313,14 +364,17 @@ export async function runEval(db: Db, args: RunEvalArgs): Promise<EvalRunSummary
   const judgeModelId = args.judgeModelId ?? JUDGE_MODEL_ID;
   const userId = args.userId ?? null;
 
+  const itemStep = args.itemStep ?? step;
+  const evaluate = args.evaluator ?? evaluateItem;
+
   const items = await loadGoldenItems(db, {
-    step,
+    step: itemStep,
     itemIds: args.itemIds,
     limit: args.limit,
   });
   if (items.length === 0) {
     throw new Error(
-      `No eval_items for step "${step}". Run \`npm run cli -- golden select --n 40\` first.`,
+      `No eval_items for step "${itemStep}". Run \`npm run cli -- golden select --n 40\` first.`,
     );
   }
 
@@ -344,7 +398,7 @@ export async function runEval(db: Db, args: RunEvalArgs): Promise<EvalRunSummary
     items,
     args.concurrency ?? 3,
     async (item, index) => {
-      const row = await evaluateItem(db, item, { modelId, judgeModelId, userId });
+      const row = await evaluate(db, item, { modelId, judgeModelId, userId });
       args.onProgress?.({ index, total: items.length, item, row });
       return row;
     },
