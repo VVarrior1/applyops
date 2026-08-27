@@ -21,6 +21,14 @@ dotenv.config({
 
 type Schema = typeof schema;
 
+/**
+ * The database handle every server-side helper takes as its first argument
+ * (`isEmailAllowed(db, …)`, `callStructured({db, …})`, …). Exported so call
+ * sites and tests share one name instead of re-deriving
+ * `PostgresJsDatabase<typeof schema>` in every module. Added by Task 4.
+ */
+export type Db = PostgresJsDatabase<Schema>;
+
 let pooledDb: PostgresJsDatabase<Schema> | undefined;
 let directDb: PostgresJsDatabase<Schema> | undefined;
 

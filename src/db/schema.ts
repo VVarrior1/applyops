@@ -61,6 +61,13 @@ export const stepEnum = pgEnum("step", [
   "extract_facts",
 ]);
 
+/**
+ * The pipeline step union, derived from the DB enum so there is exactly one
+ * source of truth. Added by Task 4 (the LLM layer keys `DEFAULT_MODEL_BY_STEP`
+ * and `callStructured({step})` off it); Task 5's step modules use it too.
+ */
+export type Step = (typeof stepEnum.enumValues)[number];
+
 export const atsVendorEnum = pgEnum("ats_vendor", [
   "greenhouse",
   "lever",
