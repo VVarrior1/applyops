@@ -164,10 +164,15 @@ describe("isPreferredLocation", () => {
     expect(isPreferredLocation(null, false)).toBe(false);
   });
 
-  it("honours user prefs over the default allow-list", () => {
+  it("with prefs, the city list is advisory: geography is enforced by country in SQL", () => {
     const prefs = { locations: ["Calgary", "Vancouver"], remote: "any" };
     expect(isPreferredLocation("Calgary, AB", false, prefs)).toBe(true);
-    expect(isPreferredLocation("New York, NY", false, prefs)).toBe(false);
+    expect(isPreferredLocation("Calgary, Alberta, Canada", false, prefs)).toBe(true);
+    expect(isPreferredLocation("New York, NY", false, prefs)).toBe(true);
+    expect(isPreferredLocation("Canada", true, prefs)).toBe(true);
+    // unknown location: remote kept, onsite dropped
+    expect(isPreferredLocation(null, true, prefs)).toBe(true);
+    expect(isPreferredLocation(null, false, prefs)).toBe(false);
   });
 
   it("honours the remote mode in prefs", () => {

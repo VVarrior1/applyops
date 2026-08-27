@@ -330,13 +330,17 @@ export function isPreferredLocation(
   if (mode === "onsite" && remote) return false;
 
   const norm = normalizeLocation(location);
-  const wanted = (prefs?.locations ?? []).map((l) => l.trim().toLowerCase()).filter(Boolean);
 
-  if (wanted.length > 0) {
-    if (!norm) return remote;
-    if (wanted.some((w) => norm.includes(w))) return true;
-    // "Remote" with no geography satisfies any location preference.
-    return remote && stripRemoteTokens(norm) === "";
+  if (prefs) {
+    // With user prefs, geography is enforced by COUNTRY in SQL
+    // (src/rank/candidates.ts → search_prefs.countries); the user's city list
+    // is advisory only — it feeds the "onsite outside your cities" caveat in
+    // src/rank/verdict.ts rather than hiding postings. (Before 2026-08-27 this
+    // did a literal substring match against the raw pref strings, which
+    // rejected "Calgary, Alberta, Canada" for a "Calgary, AB" pref and every
+    // US city, leaving the ranker with zero candidates.)
+    if (!norm) return remote; // unknown location: keep remote, drop onsite (not actionable)
+    return true;
   }
 
   if (!norm) return remote;

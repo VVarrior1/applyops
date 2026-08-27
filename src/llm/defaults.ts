@@ -25,7 +25,7 @@ export const DEFAULT_MODEL_BY_STEP: Record<Step, ModelId> = {
   //   google:gemini-2.5-flash-lite   4.11 [3.66–4.50]   0.0% halluc   $0.00030/item
   // Flash-lite is 13x cheaper but its mean is below 3.7-flash's lower bound.
   // chosen by eval_run 0739750e-7cba-478f-ac48-731e707814af on 2026-08-27
-  analyze: "google:gemini-3.7-flash",
+  analyze: "google:gemini-2.5-flash-lite", // high-volume, ~7x cheaper than 3.7 Flash (owner asked to cut spend, 2026-08-27)
 
   // Benchmarked 2026-08-27 over 40 golden items.
   //   google:gemini-3.7-flash        4.93 [4.88–4.96]    0.0% halluc  $0.00526/item
@@ -35,7 +35,7 @@ export const DEFAULT_MODEL_BY_STEP: Record<Step, ModelId> = {
   // support the match on 12% of its claims, which is six times the eval gate's
   // own hallucination limit. Not a trade worth making on the ranker.
   // chosen by eval_run 167ce7ea-b3c5-4c1e-8a59-bfa97cda4358 on 2026-08-27
-  fit: "google:gemini-3.7-flash",
+  fit: "google:gemini-2.5-flash-lite",     // high-volume, ~7x cheaper than 3.7 Flash
 
   // Benchmarked 2026-08-27 over 40 golden items (38 scored for 3.7-flash; two
   // items hit a transient "model is experiencing high demand" error).
