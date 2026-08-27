@@ -1,0 +1,150 @@
+import { desc, eq, inArray } from "drizzle-orm";
+import { format } from "date-fns";
+import { requireUser } from "@/src/auth/require";
+import { getDb } from "@/src/db/client";
+import { applications, companies, jobs, outcomeEvents } from "@/src/db/schema";
+import { OutcomeButtons } from "@/components/applications/OutcomeButtons";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
+
+const STATUS_LABEL: Record<string, string> = {
+  draft: "Draft",
+  applied: "Applied",
+  responded: "Responded",
+  interviewing: "Interviewing",
+  offer: "Offer",
+  rejected: "Rejected",
+  ghosted: "Ghosted",
+  withdrawn: "Withdrawn",
+};
+
+const EVENT_LABEL: Record<string, string> = {
+  ...STATUS_LABEL,
+  viewed: "Viewed",
+  response: "Response",
+  oa: "OA",
+  phone_screen: "Phone screen",
+  interview: "Interview",
+};
+
+/**
+ * `/applications` — plan Task 10 Step 2: a table (company, title, status,
+ * applied date, last event) with outcome-logging buttons per row.
+ */
+export default async function ApplicationsPage() {
+  const user = await requireUser();
+  const db = getDb();
+
+  const rows = await db
+    .select({
+      id: applications.id,
+      status: applications.status,
+      createdAt: applications.createdAt,
+      jobTitle: jobs.title,
+      companyName: companies.name,
+    })
+    .from(applications)
+    .innerJoin(jobs, eq(applications.jobId, jobs.id))
+    .leftJoin(companies, eq(jobs.companyId, companies.id))
+    .where(eq(applications.userId, user.id))
+    .orderBy(desc(applications.createdAt));
+
+  const events =
+    rows.length === 0
+      ? []
+      : await db
+          .select({
+            applicationId: outcomeEvents.applicationId,
+            type: outcomeEvents.type,
+            occurredAt: outcomeEvents.occurredAt,
+          })
+          .from(outcomeEvents)
+          .where(
+            inArray(
+              outcomeEvents.applicationId,
+              rows.map((row) => row.id),
+            ),
+          );
+
+  const lastEventByApplication = new Map<string, { type: string; occurredAt: Date }>();
+  for (const event of events) {
+    const existing = lastEventByApplication.get(event.applicationId);
+    if (!existing || event.occurredAt > existing.occurredAt) {
+      lastEventByApplication.set(event.applicationId, {
+        type: event.type,
+        occurredAt: event.occurredAt,
+      });
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div>
+        <h1 className="text-xl font-semibold">Applications</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Track outcomes for every application you&apos;ve sent. The funnel
+          derived from these events is on the{" "}
+          <a href="/funnel" className="underline underline-offset-2">
+            Funnel
+          </a>{" "}
+          page.
+        </p>
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Company</TableHead>
+            <TableHead>Title</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Applied</TableHead>
+            <TableHead>Last event</TableHead>
+            <TableHead>Log outcome</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={6} className="text-center text-muted-foreground">
+                No applications yet — mark a tailored resume as applied from a
+                job&apos;s Tailor tab.
+              </TableCell>
+            </TableRow>
+          )}
+          {rows.map((row) => {
+            const lastEvent = lastEventByApplication.get(row.id);
+            return (
+              <TableRow key={row.id}>
+                <TableCell className="font-medium">{row.companyName ?? "—"}</TableCell>
+                <TableCell className="max-w-60 truncate whitespace-normal">
+                  {row.jobTitle}
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline">{STATUS_LABEL[row.status] ?? row.status}</Badge>
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {format(row.createdAt, "MMM d, yyyy")}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {lastEvent
+                    ? `${EVENT_LABEL[lastEvent.type] ?? lastEvent.type} · ${format(lastEvent.occurredAt, "MMM d")}`
+                    : "—"}
+                </TableCell>
+                <TableCell>
+                  <OutcomeButtons applicationId={row.id} />
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}

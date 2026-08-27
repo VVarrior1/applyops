@@ -29,6 +29,8 @@ type Schema = typeof schema;
  */
 export type Db = PostgresJsDatabase<Schema>;
 
+let pooledClient: ReturnType<typeof postgres> | undefined;
+let directClient: ReturnType<typeof postgres> | undefined;
 let pooledDb: PostgresJsDatabase<Schema> | undefined;
 let directDb: PostgresJsDatabase<Schema> | undefined;
 
@@ -41,8 +43,8 @@ export function getDb(): PostgresJsDatabase<Schema> {
   if (!pooledDb) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("DATABASE_URL is not set");
-    const client = postgres(url, { prepare: false });
-    pooledDb = drizzle(client, { schema });
+    pooledClient = postgres(url, { prepare: false });
+    pooledDb = drizzle(pooledClient, { schema });
   }
   return pooledDb;
 }
@@ -56,8 +58,27 @@ export function getDirectDb(): PostgresJsDatabase<Schema> {
   if (!directDb) {
     const url = process.env.DIRECT_DATABASE_URL;
     if (!url) throw new Error("DIRECT_DATABASE_URL is not set");
-    const client = postgres(url);
-    directDb = drizzle(client, { schema });
+    directClient = postgres(url);
+    directDb = drizzle(directClient, { schema });
   }
   return directDb;
+}
+
+/**
+ * Closes any postgres-js sockets opened by `getDb()`/`getDirectDb()` in this
+ * process and resets both caches, so a later call reconnects fresh.
+ *
+ * postgres-js keeps its TCP socket open indefinitely once connected, which
+ * otherwise stalls Node's natural exit — a one-off script or CLI command
+ * that calls `getDb()`/`getDirectDb()` and then simply returns will hang
+ * forever instead of letting the process exit. Call this before returning
+ * from any such script/command instead of reaching for `process.exit()`
+ * (which risks losing not-yet-flushed stdout when piped/redirected).
+ */
+export async function closeDb(): Promise<void> {
+  await Promise.all([pooledClient?.end(), directClient?.end()]);
+  pooledClient = undefined;
+  directClient = undefined;
+  pooledDb = undefined;
+  directDb = undefined;
 }
