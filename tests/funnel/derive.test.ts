@@ -99,14 +99,14 @@ describe("deriveFunnel", () => {
 
   it("groups by week using ISO week keys, one row per distinct week", () => {
     const apps: FunnelApplication[] = [
-      app("a1", "2026-08-26T00:00:00Z", null, []), // ISO week 2026-W35 (Tue)
-      app("a2", "2026-08-30T00:00:00Z", null, []), // same ISO week (Sat)
-      app("a3", "2026-09-07T00:00:00Z", null, []), // ISO week 2026-W36
+      app("a1", "2026-08-26T00:00:00Z", null, []), // ISO week 2026-W35 (Wed)
+      app("a2", "2026-08-30T00:00:00Z", null, []), // same ISO week (Sun, the week's last day)
+      app("a3", "2026-09-07T00:00:00Z", null, []), // next ISO week 2026-W37 (Mon)
     ];
 
     const rows = deriveFunnel(apps, { groupBy: "week" });
 
-    expect(rows.map((r) => r.key)).toEqual(["2026-W35", "2026-W36"]);
+    expect(rows.map((r) => r.key)).toEqual(["2026-W35", "2026-W37"]);
     expect(rows[0].applied).toBe(2);
     expect(rows[1].applied).toBe(1);
   });
