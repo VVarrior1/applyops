@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { PrefsForm } from "../onboarding/prefs-form";
 import { FactsEditor } from "./facts-editor";
 import { BudgetEditor } from "./budget-editor";
+import { ContactEditor } from "./contact-editor";
 import { DeleteMyData } from "./delete-my-data";
 
 /**
@@ -28,7 +29,11 @@ export default async function SettingsPage() {
 
   const [[profile], facts, prefs] = await Promise.all([
     db
-      .select({ isOwner: profiles.isOwner, dailyBudgetUsd: profiles.dailyBudgetUsd })
+      .select({
+        isOwner: profiles.isOwner,
+        dailyBudgetUsd: profiles.dailyBudgetUsd,
+        contact: profiles.contact,
+      })
       .from(profiles)
       .where(eq(profiles.userId, user.id))
       .limit(1),
@@ -81,6 +86,18 @@ export default async function SettingsPage() {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Resume contact info</CardTitle>
+          <CardDescription>
+            Printed on the header of every generated resume PDF.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ContactEditor initialContact={profile?.contact ?? {}} />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
