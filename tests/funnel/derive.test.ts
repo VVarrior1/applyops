@@ -24,6 +24,10 @@ function app(
 
 describe("deriveFunnel", () => {
   it("4 apps: 2 responded, 1 interview, 1 ghosted -> responseRate 0.5, interviewRate 0.25, Wilson CI within [0,1] and containing 0.5", () => {
+    // a1: responded, nothing further. a2: responded, then escalated to
+    // interview (still counts toward `responded` too — cumulative, not
+    // exclusive-latest-stage). a3: ghosted, never responded. a4: no
+    // events at all yet.
     const apps: FunnelApplication[] = [
       app("a1", "2026-08-01T00:00:00Z", "tailor@1", [
         { type: "applied", occurredAt: "2026-08-01T00:00:00Z" },
@@ -32,16 +36,13 @@ describe("deriveFunnel", () => {
       app("a2", "2026-08-01T00:00:00Z", "tailor@1", [
         { type: "applied", occurredAt: "2026-08-01T00:00:00Z" },
         { type: "response", occurredAt: "2026-08-04T00:00:00Z" },
+        { type: "interview", occurredAt: "2026-08-10T00:00:00Z" },
       ]),
       app("a3", "2026-08-01T00:00:00Z", "tailor@1", [
         { type: "applied", occurredAt: "2026-08-01T00:00:00Z" },
-        { type: "response", occurredAt: "2026-08-03T00:00:00Z" },
-        { type: "interview", occurredAt: "2026-08-10T00:00:00Z" },
-      ]),
-      app("a4", "2026-08-01T00:00:00Z", "tailor@1", [
-        { type: "applied", occurredAt: "2026-08-01T00:00:00Z" },
         { type: "ghosted", occurredAt: "2026-08-20T00:00:00Z" },
       ]),
+      app("a4", "2026-08-01T00:00:00Z", "tailor@1", []),
     ];
 
     const [row] = deriveFunnel(apps, { groupBy: "all" });
@@ -60,6 +61,40 @@ describe("deriveFunnel", () => {
     expect(upper).toBeLessThanOrEqual(1);
     expect(lower).toBeLessThanOrEqual(0.5);
     expect(upper).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it("counts responded/interviewing/offers cumulatively ('ever reached'), not from the current single stage — an application that responded (or interviewed, or got an offer) and was later rejected still counts toward those buckets", () => {
+    const apps: FunnelApplication[] = [
+      app("a1", "2026-08-01T00:00:00Z", null, [
+        { type: "response", occurredAt: "2026-08-03T00:00:00Z" },
+        { type: "rejected", occurredAt: "2026-08-20T00:00:00Z" },
+      ]),
+      app("a2", "2026-08-01T00:00:00Z", null, [
+        { type: "phone_screen", occurredAt: "2026-08-05T00:00:00Z" },
+        { type: "rejected", occurredAt: "2026-08-25T00:00:00Z" },
+      ]),
+      app("a3", "2026-08-01T00:00:00Z", null, [
+        { type: "offer", occurredAt: "2026-08-15T00:00:00Z" },
+      ]),
+      app("a4", "2026-08-01T00:00:00Z", null, []),
+    ];
+
+    const [row] = deriveFunnel(apps, { groupBy: "all" });
+
+    expect(row.applied).toBe(4);
+    // a1 (response), a2 (phone_screen), a3 (offer) all reached "responded"
+    // at some point, even though a1/a2's *current* status is "rejected".
+    expect(row.responded).toBe(3);
+    // a2 (phone_screen) and a3 (offer) both reached "interviewing".
+    expect(row.interviewing).toBe(2);
+    // a3 (offer) — an offer event counts toward `offers` even though it's
+    // also, by definition, an "interviewing" event.
+    expect(row.offers).toBe(1);
+    // a1 and a2 are currently rejected (terminal, current-status count).
+    expect(row.rejected).toBe(2);
+    expect(row.ghosted).toBe(0);
+    expect(row.responseRate).toBe(0.75);
+    expect(row.interviewRate).toBe(0.5);
   });
 
   it("groups by week using ISO week keys, one row per distinct week", () => {
@@ -155,6 +190,35 @@ describe("currentStage / stageForEventType", () => {
 
   it("defaults to 'applied' with no events", () => {
     expect(currentStage([])).toBe("applied");
+  });
+
+  it("does not regress to 'applied' when a non-advancing event (viewed, or a late/backdated applied) is logged after a real progression event", () => {
+    // Logging "viewed" (e.g. because the ATS shows it was opened) after
+    // "response" must not downgrade status back to "applied".
+    const viewedAfterResponse: FunnelApplication["events"] = [
+      { type: "response", occurredAt: new Date("2026-08-03T00:00:00Z") },
+      { type: "viewed", occurredAt: new Date("2026-08-05T00:00:00Z") },
+    ];
+    expect(currentStage(viewedAfterResponse)).toBe("responded");
+
+    // Same for a late/backdated "applied" logged after a real interview.
+    const lateAppliedAfterInterview: FunnelApplication["events"] = [
+      { type: "interview", occurredAt: new Date("2026-08-10T00:00:00Z") },
+      { type: "applied", occurredAt: new Date("2026-08-12T00:00:00Z") },
+    ];
+    expect(currentStage(lateAppliedAfterInterview)).toBe("interviewing");
+  });
+
+  it("falls back to 'applied' (using the latest of them) when only applied/viewed events exist", () => {
+    expect(
+      currentStage([{ type: "applied", occurredAt: new Date("2026-08-01T00:00:00Z") }]),
+    ).toBe("applied");
+    expect(
+      currentStage([
+        { type: "applied", occurredAt: new Date("2026-08-01T00:00:00Z") },
+        { type: "viewed", occurredAt: new Date("2026-08-05T00:00:00Z") },
+      ]),
+    ).toBe("applied");
   });
 });
 

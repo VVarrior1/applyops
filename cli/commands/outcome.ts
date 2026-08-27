@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { Command } from "commander";
-import { getDirectDb } from "../../src/db/client";
+import { closeDb, getDirectDb } from "../../src/db/client";
 import { applications } from "../../src/db/schema";
 import { logOutcome } from "../../src/funnel/outcomes";
 import type { OutcomeEventType } from "../../src/funnel/derive";
@@ -81,11 +81,15 @@ export function register(program: Command): void {
         `Logged "${result.event.type}" for application ${applicationId} at ${result.event.occurredAt.toISOString()}. Status is now "${result.status}".`,
       );
 
-      // postgres-js keeps its socket open after this resolves, and
       // cli/index.ts only calls process.exit() on the error path (see its
-      // `.catch()`), so without this a successful run never returns
-      // control to the shell. Exiting explicitly here is scoped to this
-      // command rather than changing that shared entry point.
-      process.exit(0);
+      // `.catch()`), and postgres-js keeps its socket open indefinitely
+      // once connected, so without closing it here a successful run would
+      // never return control to the shell. closeDb() (rather than
+      // process.exit()) lets Node exit naturally once the socket is
+      // closed, which also guarantees stdout is flushed first — piping
+      // this command's output (`| tee log.txt`) or redirecting it
+      // (`> out.txt`) won't lose the success line the way an immediate
+      // `process.exit()` can.
+      await closeDb();
     });
 }

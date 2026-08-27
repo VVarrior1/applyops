@@ -6,13 +6,21 @@
  * `outcome_events` rows and pass them in.
  *
  * Terminology: `OutcomeEventType` is the full `outcome_type` DB enum (every
- * event a user or the CLI can log). `ApplicationStage` is the *funnel*
- * bucket an application currently sits in — the same values as the
+ * event a user or the CLI can log). `ApplicationStage` is the *current*
+ * funnel bucket an application sits in — the same values as the
  * `application_status` DB enum minus `draft` (an application only exists
  * here once it has been marked applied), because that enum is itself a
  * mutually-exclusive "current status" column: an application has exactly
- * one status at a time, so the funnel counts each application into exactly
- * one bucket, not into every stage it ever passed through.
+ * one status at a time. `currentStage` (and therefore `applications.status`
+ * in outcomes.ts) reflects that single current bucket.
+ *
+ * The funnel counts in `FunnelRow`, however, are cumulative "ever reached"
+ * sets, not current-status buckets — spec: "Response = any of
+ * response|oa|phone_screen|interview|offer; interviewing =
+ * phone_screen|interview|offer". An application that responded and was
+ * later rejected still counts toward `responded`; only `rejected`/`ghosted`
+ * (terminal states with no further stage to reach) are current-status
+ * counts. See `buildRow` below.
  */
 
 import { format } from "date-fns";
@@ -66,17 +74,18 @@ export interface FunnelRow {
 }
 
 /**
- * Which funnel stage a given event type moves an application into. `viewed`
+ * Which funnel stage a given event type moves an application into, for
+ * `currentStage`'s single-bucket "current status" purposes. `viewed`
  * carries no stage of its own (it's a signal, not a milestone) so it maps to
  * the baseline `applied` stage — an application with only `viewed` events
  * still reads as "applied, nothing further yet".
  *
- * `response`/`oa` → `responded`; `phone_screen`/`interview` → `interviewing`
- * (spec: "Response = any of response|oa|phone_screen|interview|offer;
- * interviewing = phone_screen|interview|offer" — this is the set of event
- * types that *can* advance an application at least that far; which single
- * stage it ends up in is resolved by `currentStage` below, not by treating
- * these as independently-overlapping flags).
+ * `response`/`oa` → `responded`; `phone_screen`/`interview` → `interviewing`.
+ * Note that `buildRow`'s cumulative funnel counts do *not* use this map for
+ * `responded`/`interviewing`/`offers` — those are independently-overlapping
+ * "has this application ever logged one of these event types" sets (see
+ * `buildRow`), because a single current stage can't represent "responded
+ * then later rejected" for funnel-counting purposes.
  */
 const STAGE_BY_EVENT_TYPE: Record<OutcomeEventType, ApplicationStage> = {
   applied: "applied",
@@ -96,18 +105,31 @@ export function stageForEventType(type: OutcomeEventType): ApplicationStage {
 }
 
 /**
- * An application's current funnel stage: the stage of its most recent event
- * by `occurredAt`, or `applied` if it has none yet. "Most recent" (not
- * "furthest ever reached") mirrors how `applications.status` itself is
- * maintained — each new outcome event, including a backdated one logged
- * late via `--at`, recomputes status from the full event history rather
- * than only ever moving forward. In practice these events are logged in
- * order, so this coincides with "furthest reached" for the normal case.
+ * Event types that never represent forward progress on their own: `applied`
+ * is the baseline every application starts at, and `viewed` is a signal
+ * ("the ATS shows it was opened"), not a milestone. Logging one of these
+ * — including late/backdated, e.g. an ATS-triggered `viewed` days after a
+ * real `response` — must never regress `currentStage` back to `applied`.
+ */
+const NON_ADVANCING_TYPES: ReadonlySet<OutcomeEventType> = new Set(["applied", "viewed"]);
+
+/**
+ * An application's current funnel stage: the stage of its most recent
+ * *advancing* event by `occurredAt` (i.e. ignoring `applied`/`viewed` when
+ * some other event exists), or `applied` if it has no events, or only
+ * `applied`/`viewed` events, so far. "Most recent" (not "furthest ever
+ * reached") mirrors how `applications.status` itself is maintained — each
+ * new outcome event, including a backdated one logged late via `--at`,
+ * recomputes status from the full event history rather than only ever
+ * moving forward. In practice these events are logged in order, so this
+ * coincides with "furthest reached" for the normal case.
  */
 export function currentStage(events: readonly FunnelEvent[]): ApplicationStage {
   if (events.length === 0) return "applied";
-  let latest = events[0];
-  for (const event of events) {
+  const advancing = events.filter((event) => !NON_ADVANCING_TYPES.has(event.type));
+  const candidates = advancing.length > 0 ? advancing : events;
+  let latest = candidates[0];
+  for (const event of candidates) {
     if (event.occurredAt >= latest.occurredAt) latest = event;
   }
   return stageForEventType(latest.type);
@@ -153,6 +175,22 @@ function groupKey(app: FunnelApplication, groupBy: FunnelGroupBy): string {
   }
 }
 
+/** Event types that count an application toward `FunnelRow.responded` — spec: "Response = any of response|oa|phone_screen|interview|offer". */
+const RESPONDED_TYPES: ReadonlySet<OutcomeEventType> = new Set([
+  "response",
+  "oa",
+  "phone_screen",
+  "interview",
+  "offer",
+]);
+
+/** Event types that count an application toward `FunnelRow.interviewing` — spec: "interviewing = phone_screen|interview|offer". */
+const INTERVIEWING_TYPES: ReadonlySet<OutcomeEventType> = new Set([
+  "phone_screen",
+  "interview",
+  "offer",
+]);
+
 function buildRow(key: string, apps: readonly FunnelApplication[]): FunnelRow {
   const applied = apps.length;
   let responded = 0;
@@ -162,24 +200,29 @@ function buildRow(key: string, apps: readonly FunnelApplication[]): FunnelRow {
   let ghosted = 0;
 
   for (const app of apps) {
+    // Cumulative "ever reached" sets, not the current single stage: an
+    // application that responded and was later rejected still counts
+    // toward `responded` (and toward `interviewing`/`offers` if it got
+    // that far before the rejection). These sets nest —
+    // offer ⊆ interviewing ⊆ responded — so the counts stay monotonic.
+    if (app.events.some((event) => RESPONDED_TYPES.has(event.type))) responded++;
+    if (app.events.some((event) => INTERVIEWING_TYPES.has(event.type))) interviewing++;
+    if (app.events.some((event) => event.type === "offer")) offers++;
+
+    // Terminal states are current-status counts, not cumulative ones: an
+    // application is only ever counted as rejected/ghosted right now, via
+    // `currentStage` (its most recent advancing event) — see that
+    // function's doc comment.
     switch (currentStage(app.events)) {
-      case "responded":
-        responded++;
-        break;
-      case "interviewing":
-        interviewing++;
-        break;
-      case "offer":
-        offers++;
-        break;
       case "rejected":
         rejected++;
         break;
       case "ghosted":
         ghosted++;
         break;
-      // "applied" and "withdrawn" don't have a dedicated FunnelRow column;
-      // they still count in `applied` (every app in the group does).
+      // "applied", "responded", "interviewing", "offer", and "withdrawn"
+      // are handled above or don't have a dedicated FunnelRow column; every
+      // app in the group already counts in `applied`.
     }
   }
 
