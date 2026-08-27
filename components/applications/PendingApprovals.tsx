@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/src/db/client";
 import { applications, approvals, companies, jobs } from "@/src/db/schema";
 import {
@@ -49,7 +49,12 @@ export async function PendingApprovals({ userId }: { userId: string }) {
     .innerJoin(companies, eq(companies.id, jobs.companyId))
     // Scoped to the signed-in user, like every other query in app/ (spec §4).
     .where(and(eq(applications.userId, userId), eq(approvals.decision, "pending")))
-    .orderBy(desc(approvals.id));
+    // `approvals` has no chronological column (only `decided_at`, which is
+    // null while a row is pending), and adding one is out of scope here, so
+    // newest-first is not available. Ordering by the primary key would sort by
+    // a random UUIDv4 and change on every render; company/title is stable and
+    // means something to the reader.
+    .orderBy(asc(companies.name), asc(jobs.title));
 
   if (rows.length === 0) return null;
 

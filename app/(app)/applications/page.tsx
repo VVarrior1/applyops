@@ -4,10 +4,14 @@ import { PendingApprovals } from "@/components/applications/PendingApprovals";
 /**
  * Applications dashboard.
  *
- * NOTE FOR THE INTEGRATOR: Task 12 owns the body of this page (the outcome
- * funnel buttons and the application list). Task 15 only contributes the
- * `<PendingApprovals />` panel above it — when merging, keep Task 12's page
- * and add the two lines that import and render the panel.
+ * NOTE FOR THE INTEGRATOR: Task 10 owns the body of this page (plan line 254:
+ * `app/(app)/applications/page.tsx` + `components/applications/OutcomeButtons.tsx`),
+ * so this file will conflict as a whole. Task 15 only contributes the
+ * `<PendingApprovals />` panel above the list — when merging, keep Task 10's
+ * page body and add exactly the two lines that import and render the panel:
+ *
+ *   import { PendingApprovals } from "@/components/applications/PendingApprovals";
+ *   <PendingApprovals userId={user.id} />
  */
 export default async function ApplicationsPage() {
   const user = await requireUser();

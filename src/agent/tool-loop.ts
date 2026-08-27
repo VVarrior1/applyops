@@ -12,13 +12,26 @@
  *    schemas* are v1's, unchanged.
  *  - **The approval gate is structural, not advisory.** v1 asked the model to
  *    call `request_user_confirmation` before submitting and trusted it to
- *    comply. Here, `request_user_confirmation` is the only path that can set
- *    `submitApproved`, a dry run can never come back approved no matter what
- *    the confirmation handler returns, and a `mark_done(success: true)` that
- *    arrives without a recorded approval is downgraded to `needs_manual`
- *    instead of being reported as a submitted application. The spec's "no
- *    auto-submit, ever" is thereby a property of this file rather than a
- *    property of the prompt.
+ *    comply. Here the gate is enforced in four places:
+ *
+ *      1. `request_user_confirmation` is the only path that can arm a submit,
+ *         and a dry run can never come back approved no matter what the
+ *         confirmation handler returns.
+ *      2. `click_element` refuses a submit-shaped click (`[type=submit]`,
+ *         "Submit", "Send application", and "Apply" once fields hold data)
+ *         unless an approval is armed — so the model cannot submit by not
+ *         asking, and cannot submit by asking and ignoring the answer.
+ *      3. The approval is a *one-shot ticket*: the click it authorises spends
+ *         it, so one `y` can never authorise two submissions.
+ *      4. Once any tool call ends the run, the rest of that model turn is not
+ *         executed. Parallel tool use means a single turn can carry
+ *         `[request_user_confirmation, click_element(submit)]`; without this,
+ *         a declined confirmation would still be followed by the click.
+ *
+ *    `mark_done(success: true)` without a recorded approval is additionally
+ *    downgraded to `needs_manual` rather than reported as a submission. The
+ *    spec's "no auto-submit, ever" is thereby a property of this file rather
+ *    than a property of the prompt.
  *
  * The loop deliberately does not write to the database. `run.ts` owns the
  * `approvals` row and the application status; this module owns the browser
@@ -267,7 +280,23 @@ export async function runToolLoop(
     ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
   let active = page;
+  /** A human approval is on record for this run (reported in the result). */
   let approved = false;
+  /**
+   * One-shot permission to click a submit-shaped control. Set by an approved
+   * `request_user_confirmation` and *consumed* by the click it authorises, so
+   * a single `y` can never authorise a second submission. Kept separate from
+   * `approved` because `mark_done(success:true)` must still see the approval
+   * after the submit click has spent this ticket.
+   */
+  let submitAuthorized = false;
+  /**
+   * Whether anything has been entered into the page yet. Used to disambiguate
+   * an "Apply" click: on a bare posting page it opens the form, but once
+   * fields hold data it may be the terminal action. Seeded from the fast path,
+   * which fills forms that are inline on the posting page (Greenhouse).
+   */
+  let fieldsFilled = (fastPath?.filled.length ?? 0) > 0;
   const usage: TokenUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
   let steps = 0;
 
@@ -343,6 +372,21 @@ export async function runToolLoop(
     let sawNavigation = false;
 
     for (const call of generated.toolCalls) {
+      // A model turn can carry several tool calls (parallel tool use), and
+      // `break` inside the switch below only leaves the switch. Without this
+      // guard a turn of [request_user_confirmation, click_element(submit)]
+      // would execute the submit click *after* the human declined. Once the
+      // run has an ending, nothing else in the turn touches the browser.
+      if (done) {
+        toolResults.push({
+          type: "tool-result",
+          toolCallId: call.toolCallId,
+          toolName: call.toolName,
+          output: { type: "text", value: "Run already ended \u2014 tool not executed." },
+        });
+        continue;
+      }
+
       const input = (call.input ?? {}) as Record<string, unknown>;
       log(`tool=${call.toolName}`);
       let text: string;
@@ -352,20 +396,38 @@ export async function runToolLoop(
           case "get_page_structure":
             text = await extractPageStructure(active);
             break;
-          case "click_element":
+          case "click_element": {
+            // The second half of the structural gate: the model is *told* not
+            // to submit without approval, and here it is also unable to. A
+            // dry run never sets `submitAuthorized`, so `--dry-run` cannot
+            // click Submit no matter what the model or the handler does.
+            if (isSubmitLike(input, fieldsFilled)) {
+              if (!submitAuthorized) {
+                text = submitBlockedMessage(dryRun);
+                log(text);
+                break;
+              }
+              // Spend the ticket before the click, so a click that throws
+              // still consumes the approval rather than leaving it armed.
+              submitAuthorized = false;
+            }
             text = await doClick(active, input);
             await active.waitForTimeout(800);
             active = resolveActivePage(active);
             sawNavigation = true;
             break;
+          }
           case "fill_input":
             text = await doFill(active, input);
+            fieldsFilled = true;
             break;
           case "select_option":
             text = await doSelect(active, input);
+            fieldsFilled = true;
             break;
           case "upload_file":
             text = await doUpload(active, input, resumePath);
+            fieldsFilled = true;
             break;
           case "scroll_page":
             text = await doScroll(active, input);
@@ -393,6 +455,7 @@ export async function runToolLoop(
               dryRun,
             });
             approved = dryRun ? false : answer === true;
+            submitAuthorized = approved;
             if (approved) {
               text = "User confirmed — proceeding to submit";
             } else {
@@ -612,7 +675,8 @@ ${profile}
 - Never invent a fact. Everything you type must come from the candidate profile above or be a direct, truthful restatement of it. If a required field has no answer in the profile — salary expectations, GPA, years of experience, work authorisation marked UNKNOWN — leave it blank and call mark_done with success=false explaining what the human must supply.
 - Work authorisation: answer those questions only if this posting is based in the region the profile names. Otherwise leave them blank and report them — a wrong answer here is a false statement on a legal document.
 - Never write an essay claiming experience that is not in the profile. For open-text questions, answer briefly and only from the profile; if the profile does not support an answer, leave it blank and report it.
-- Never click Submit before an approved request_user_confirmation. Calling mark_done with success=true without one is a protocol violation and will be recorded as an incomplete application.
+- Never click Submit before an approved request_user_confirmation. This is enforced: a click on a submit-shaped control (a submit button, "Submit", "Send application", or "Apply" once fields are filled) is REFUSED and does nothing until a confirmation comes back approved, and each approval authorises exactly one such click. Calling mark_done with success=true without an approval is a protocol violation and will be recorded as an incomplete application.
+- To reach a form behind an "Apply" link, prefer navigate_to with the form URL (http(s) only) over clicking a button labelled Apply.
 ${dryRun ? "- **DRY RUN**: this run cannot submit. Fill the form, then call request_user_confirmation; it will come back declined, and that is the expected end of the run." : ""}`;
 }
 
@@ -675,16 +739,74 @@ export async function extractPageStructure(page: AgentPage): Promise<string> {
   return `URL: ${url}\nTitle: ${title}\n\nElements:\n${elements.slice(0, MAX_ELEMENTS).join("\n")}`;
 }
 
+/**
+ * Unambiguous submit markers. `[type=submit]` in any quoting, and the word
+ * "submit" anywhere in a selector or label (`#submit-application`, "Submit
+ * Application", "Submit your application").
+ */
+const SUBMIT_MARKER_RE = /\[\s*type\s*=\s*['"]?submit['"]?\s*\]|\bsubmit\b/i;
+
+/** "Send application" / "Send my resume" / a button whose whole label is "Send". */
+const SEND_MARKER_RE = /\bsend\b\s*(?:my\s+)?(?:application|resume|cv|cover)|^\s*send\s*$/i;
+
+/** Ambiguous on its own — see `isSubmitLike`. */
+const APPLY_MARKER_RE = /\bapply\b/i;
+
+/**
+ * Does this `click_element` call look like it would submit the application?
+ *
+ * Deliberately conservative in one direction and precise in the other. Words
+ * that only ever mean "submit" (`submit`, `send application`) gate always.
+ * "Apply" is genuinely ambiguous — on a Lever or Ashby posting page "Apply for
+ * this job" *opens* the form, and gating that would leave the agent unable to
+ * reach any form at all — so it gates only once something has been entered
+ * into the page, which is exactly when an "Apply" button can be terminal.
+ *
+ * Exported for the regression tests in tests/agent/tool-loop.test.ts.
+ */
+export function isSubmitLike(
+  input: Record<string, unknown>,
+  fieldsFilled: boolean,
+): boolean {
+  const selector = typeof input.selector === "string" ? input.selector : "";
+  const text = typeof input.text === "string" ? input.text : "";
+  if (SUBMIT_MARKER_RE.test(selector) || SUBMIT_MARKER_RE.test(text)) return true;
+  if (SEND_MARKER_RE.test(selector) || SEND_MARKER_RE.test(text)) return true;
+  if (fieldsFilled && (APPLY_MARKER_RE.test(selector) || APPLY_MARKER_RE.test(text))) {
+    return true;
+  }
+  return false;
+}
+
+/** What the model is told when the gate refuses a click. */
+function submitBlockedMessage(dryRun: boolean): string {
+  const escape =
+    " If you were trying to OPEN the application form rather than submit it, use navigate_to" +
+    " with the form URL, or click a more specific element that is not labelled submit/apply/send.";
+  return dryRun
+    ? "BLOCKED: this is a dry run, so no submit-shaped click can ever be executed." +
+        " Nothing was clicked. Call mark_done with success=false when the form is filled." +
+        escape
+    : "BLOCKED: that click looks like the final submission and there is no approved" +
+        " request_user_confirmation on record. Nothing was clicked. Call" +
+        " request_user_confirmation first; if the human approves, the click will go through." +
+        escape;
+}
+
 async function doClick(page: AgentPage, input: Record<string, unknown>): Promise<string> {
   const selector = typeof input.selector === "string" ? input.selector : undefined;
   const text = typeof input.text === "string" ? input.text : undefined;
 
+  let selectorError: unknown;
   if (selector) {
     try {
       await page.click(selector, { timeout: 5000 });
       return `Clicked: ${selector}`;
-    } catch {
-      // fall through to the text-based attempt
+    } catch (err) {
+      // Remember the real failure: if there is no text fallback the model
+      // needs to hear "that selector did not match", not "you forgot an
+      // argument", or it repairs the wrong thing and burns steps.
+      selectorError = err;
     }
   }
   if (text) {
@@ -696,6 +818,9 @@ async function doClick(page: AgentPage, input: Record<string, unknown>): Promise
       await page.click(`role=button[name="${text}"]`, { timeout: 5000 });
       return `Clicked button: "${text}"`;
     }
+  }
+  if (selectorError !== undefined) {
+    throw new Error(`click failed for "${selector}": ${errorText(selectorError)}`);
   }
   throw new Error("click_element needs a selector or text");
 }
@@ -752,6 +877,14 @@ async function doScroll(page: AgentPage, input: Record<string, unknown>): Promis
 
 async function doNavigate(page: AgentPage, input: Record<string, unknown>): Promise<string> {
   const url = String(input.url ?? "");
+  // http(s) only. A `javascript:` URL can call form.submit() and would walk
+  // straight around the approval gate; `file:`/`data:` would turn the agent
+  // into a local file reader. Neither is ever needed to reach an ATS form.
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error(
+      `navigate_to only accepts http(s) URLs (refused "${url.slice(0, 80)}")`,
+    );
+  }
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.waitForTimeout(1500);
   return `Navigated to ${page.url()}`;

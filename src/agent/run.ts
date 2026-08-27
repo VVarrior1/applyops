@@ -301,6 +301,14 @@ async function recordOutcome(db: Db, applicationId: string, status: ApplyStatus)
   });
 }
 
+/**
+ * Test seam, mirroring `src/llm/call.ts`'s `_internal` convention. Everything
+ * else in this module needs a real browser; `recordOutcome` is the piece whose
+ * rule ("only `applied` writes anything") has to hold for the funnel in spec
+ * §9 to mean anything, so it is reachable from tests without Playwright.
+ */
+export const _internal = { recordOutcome };
+
 // ---------------------------------------------------------------------------
 // Files
 // ---------------------------------------------------------------------------

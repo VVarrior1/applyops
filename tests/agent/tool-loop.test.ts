@@ -3,6 +3,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { APICallError } from "ai";
 import {
   runToolLoop,
+  isSubmitLike,
   APPLY_TOOL_NAMES,
   type AgentPage,
   type ConfirmationRequest,
@@ -320,5 +321,162 @@ describe("runToolLoop — endings that are not a submission", () => {
     expect(result.status).toBe("failed");
     expect(result.notes).toContain("credit balance is too low");
     expect(model.doGenerateCalls).toHaveLength(1);
+  });
+});
+
+describe("isSubmitLike", () => {
+  it("gates the unambiguous submit shapes regardless of form state", () => {
+    for (const input of [
+      { selector: "button[type=submit]" },
+      { selector: 'input[type="submit"]' },
+      { selector: "#submit-application" },
+      { text: "Submit Application" },
+      { text: "Send Application" },
+      { text: "Send" },
+    ]) {
+      expect(isSubmitLike(input, false)).toBe(true);
+    }
+  });
+
+  it("lets an Apply click through until something has been filled", () => {
+    // On a Lever/Ashby posting page "Apply for this job" opens the form; gating
+    // it would leave the agent unable to reach any form at all.
+    expect(isSubmitLike({ text: "Apply for this job" }, false)).toBe(false);
+    expect(isSubmitLike({ selector: "#apply-btn" }, false)).toBe(false);
+    // Once fields hold data an "Apply" button can be the terminal action.
+    expect(isSubmitLike({ text: "Apply for this job" }, true)).toBe(true);
+    expect(isSubmitLike({ selector: "#apply-btn" }, true)).toBe(true);
+  });
+
+  it("does not gate ordinary form navigation", () => {
+    expect(isSubmitLike({ selector: "button#next" }, true)).toBe(false);
+    expect(isSubmitLike({ text: "Continue" }, true)).toBe(false);
+    expect(isSubmitLike({ selector: "input#resume" }, true)).toBe(false);
+  });
+});
+
+describe("runToolLoop — the approval gate cannot be walked around", () => {
+  // Regression for the review blocker: `done` was set inside the tool-call
+  // loop but only read after it, and `break` inside the switch leaves only the
+  // switch. A single turn of [confirm, submit-click] therefore clicked Submit
+  // after the human said no — in a dry run too.
+  for (const dryRun of [false, true]) {
+    it(`does not click submit when the same turn's confirmation is declined (dryRun=${dryRun})`, async () => {
+      const { page, actions } = fakePage();
+      const model = scriptedModel([
+        {
+          calls: [
+            { name: "request_user_confirmation", input: { message: "Ready to submit" } },
+            { name: "click_element", input: { selector: "button[type=submit]" } },
+          ],
+        },
+      ]);
+
+      const result = await runToolLoop(
+        page,
+        baseOpts(model, { dryRun, onConfirm: async () => false }) as never,
+      );
+
+      expect(result.status).toBe("skipped");
+      expect(result.approved).toBe(false);
+      expect(actions).toEqual([]);
+    });
+  }
+
+  it("ignores a dry run's buggy 'approved' handler in the same turn", async () => {
+    const { page, actions } = fakePage();
+    const model = scriptedModel([
+      {
+        calls: [
+          { name: "request_user_confirmation", input: { message: "Ready" } },
+          { name: "click_element", input: { text: "Submit Application" } },
+          { name: "mark_done", input: { success: true, notes: "sent" } },
+        ],
+      },
+    ]);
+
+    const result = await runToolLoop(
+      page,
+      baseOpts(model, { dryRun: true, onConfirm: async () => true }) as never,
+    );
+
+    expect(result.status).toBe("skipped");
+    expect(result.approved).toBe(false);
+    expect(actions).toEqual([]);
+  });
+
+  it("refuses a submit click that was never confirmed at all", async () => {
+    const { page, actions } = fakePage();
+    const model = scriptedModel([
+      { calls: [{ name: "click_element", input: { selector: "button[type=submit]" } }] },
+      { calls: [{ name: "mark_done", input: { success: false, notes: "gate refused it" } }] },
+    ]);
+
+    const result = await runToolLoop(page, baseOpts(model) as never);
+    expect(actions).toEqual([]);
+    expect(result.status).toBe("needs_manual");
+  });
+
+  it("executes nothing else in a turn once mark_done has ended the run", async () => {
+    const { page, actions } = fakePage();
+    const model = scriptedModel([
+      {
+        calls: [
+          { name: "mark_done", input: { success: false, notes: "captcha" } },
+          { name: "fill_input", input: { selector: "input#email", value: "ada@example.test" } },
+          { name: "click_element", input: { selector: "button#next" } },
+        ],
+      },
+    ]);
+
+    const result = await runToolLoop(page, baseOpts(model) as never);
+    expect(result.notes).toBe("captcha");
+    expect(actions).toEqual([]);
+  });
+
+  it("spends the approval on exactly one submit click", async () => {
+    const { page, actions } = fakePage();
+    const model = scriptedModel([
+      { calls: [{ name: "request_user_confirmation", input: { message: "Ready" } }] },
+      { calls: [{ name: "click_element", input: { selector: "button[type=submit]" } }] },
+      { calls: [{ name: "click_element", input: { selector: "button[type=submit]" } }] },
+      { calls: [{ name: "mark_done", input: { success: true, notes: "Confirmation #B2" } }] },
+    ]);
+
+    const result = await runToolLoop(page, baseOpts(model, { onConfirm: async () => true }) as never);
+
+    // The first click goes through; the second is refused because the ticket
+    // was spent. The approval itself stays on record, so mark_done still lands.
+    expect(actions).toEqual(["click button[type=submit]"]);
+    expect(result.status).toBe("applied");
+    expect(result.approved).toBe(true);
+    expect(result.notes).toBe("Confirmation #B2");
+  });
+
+  it("allows the Apply click that opens the form, then gates it once filled", async () => {
+    const { page, actions } = fakePage();
+    const model = scriptedModel([
+      { calls: [{ name: "click_element", input: { text: "Apply for this job" } }] },
+      { calls: [{ name: "fill_input", input: { selector: "input#email", value: "ada@example.test" } }] },
+      { calls: [{ name: "click_element", input: { text: "Apply" } }] },
+      { calls: [{ name: "mark_done", input: { success: false, notes: "needs approval" } }] },
+    ]);
+
+    await runToolLoop(page, baseOpts(model) as never);
+    expect(actions).toEqual([
+      "click text=Apply for this job",
+      "fill input#email=ada@example.test",
+    ]);
+  });
+
+  it("refuses a javascript: navigation", async () => {
+    const { page, actions } = fakePage();
+    const model = scriptedModel([
+      { calls: [{ name: "navigate_to", input: { url: "javascript:document.forms[0].submit()" } }] },
+      { calls: [{ name: "mark_done", input: { success: false } }] },
+    ]);
+
+    await runToolLoop(page, baseOpts(model) as never);
+    expect(actions).toEqual([]);
   });
 });
