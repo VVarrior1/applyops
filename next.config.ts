@@ -8,6 +8,16 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
+
+  // The pipeline's prompts are read from disk at runtime
+  // (src/pipeline/prompt-versions.ts) rather than bundled, so that the text
+  // stored in `prompt_versions.content` is byte-for-byte the file in git.
+  // Next's tracer cannot follow a dynamic `readFileSync`, so the directory is
+  // included explicitly — without this, any deployed route that runs a
+  // pipeline step would throw "Prompt directory not found".
+  outputFileTracingIncludes: {
+    "/**/*": ["./src/pipeline/prompts/**/*"],
+  },
 };
 
 export default nextConfig;
