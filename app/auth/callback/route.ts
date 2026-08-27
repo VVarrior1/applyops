@@ -16,14 +16,20 @@ import { getDb } from "@/src/db/client";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
+  const tokenHash = url.searchParams.get("token_hash");
+  const otpType = url.searchParams.get("type") as "magiclink" | "email" | "recovery" | "invite" | "signup" | null;
   const next = url.searchParams.get("next") ?? "/settings";
 
-  if (!code) {
+  if (!code && !tokenHash) {
     return NextResponse.redirect(new URL("/login?error=auth_failed", url.origin), 302);
   }
 
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+  // Two ways in: the PKCE `code` from signInWithOtp, or a `token_hash` from an
+  // admin-generated link / a custom email template (no PKCE verifier needed).
+  const { data, error } = code
+    ? await supabase.auth.exchangeCodeForSession(code)
+    : await supabase.auth.verifyOtp({ token_hash: tokenHash as string, type: otpType ?? "magiclink" });
 
   if (error || !data.user?.email) {
     return NextResponse.redirect(new URL("/login?error=auth_failed", url.origin), 302);
