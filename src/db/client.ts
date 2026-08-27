@@ -1,0 +1,45 @@
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import dotenv from "dotenv";
+import * as schema from "./schema";
+
+// Scripts run outside Next.js (seed, migrate, cli, ad hoc `tsx -e ...`) need
+// `.env.local` loaded explicitly; Next.js already loads it for the app, and
+// re-loading here is a harmless no-op (dotenv never overwrites vars that are
+// already set, and silently no-ops if the file is absent, as in production).
+dotenv.config({ path: ".env.local", quiet: true });
+
+type Schema = typeof schema;
+
+let pooledDb: PostgresJsDatabase<Schema> | undefined;
+let directDb: PostgresJsDatabase<Schema> | undefined;
+
+/**
+ * Pooled connection (Supabase transaction pooler, `DATABASE_URL`, port 6543).
+ * `prepare: false` is required — PgBouncer transaction-mode pooling does not
+ * support server-side prepared statements. Use this for all app/route code.
+ */
+export function getDb(): PostgresJsDatabase<Schema> {
+  if (!pooledDb) {
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error("DATABASE_URL is not set");
+    const client = postgres(url, { prepare: false });
+    pooledDb = drizzle(client, { schema });
+  }
+  return pooledDb;
+}
+
+/**
+ * Direct connection (`DIRECT_DATABASE_URL`, port 5432, no pooler). Use this
+ * for migrations and one-off scripts (seeds, admin CLI commands) — never
+ * from request-scoped app code.
+ */
+export function getDirectDb(): PostgresJsDatabase<Schema> {
+  if (!directDb) {
+    const url = process.env.DIRECT_DATABASE_URL;
+    if (!url) throw new Error("DIRECT_DATABASE_URL is not set");
+    const client = postgres(url);
+    directDb = drizzle(client, { schema });
+  }
+  return directDb;
+}
