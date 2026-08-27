@@ -1,15 +1,24 @@
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import dotenv from "dotenv";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import * as schema from "./schema";
 
-// This module deliberately does NOT load `.env.local` itself. `dotenv` is a
-// devDependency (drizzle-kit/tsx tooling only) — a production install
-// (`npm ci --omit=dev`, a slim Docker stage) would not have it, and this
-// module is imported from Next.js server code (which loads its own env) as
-// well as standalone scripts. Every standalone entrypoint that imports this
-// file (src/db/migrate.ts, src/db/seed-v1.ts, cli/index.ts, ...) calls
-// `dotenv.config()` itself before importing `getDb`/`getDirectDb` — by the
-// time those functions run and read `process.env`, the vars are already set.
+// Scripts run outside Next.js (seed, migrate, cli, ad hoc `tsx -e ...`) need
+// `.env.local` loaded explicitly; Next.js already loads it for the app, and
+// re-loading here is a harmless no-op (dotenv never overwrites vars that are
+// already set, and silently no-ops if the file is absent, as in production).
+// Resolved relative to the repo root (not `process.cwd()`) so this works
+// when invoked from anywhere. `dotenv` is a real `dependencies` entry (not
+// dev-only) specifically so this import survives a production-only install
+// (`npm ci --omit=dev`) of anything that pulls this module in — see
+// package.json.
+dotenv.config({
+  path: path.resolve(fileURLToPath(import.meta.url), "../../..", ".env.local"),
+  quiet: true,
+});
+
 type Schema = typeof schema;
 
 let pooledDb: PostgresJsDatabase<Schema> | undefined;
