@@ -5,7 +5,8 @@ name: Scrape
 # nightly job-board sweep). spec §6.
 on:
   schedule:
-    - cron: "0 11 * * *"
+    - cron: "0 11 * * *"   # 05:00 Calgary
+    - cron: "0 23 * * *"   # 17:00 Calgary — second pull so nothing is >12h old
   workflow_dispatch:
     inputs:
       vendors:
