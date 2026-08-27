@@ -5,6 +5,7 @@ import { register as registerCompanies } from "./companies";
 import { register as registerEval } from "./eval";
 import { register as registerGolden } from "./golden";
 import { register as registerOutcome } from "./outcome";
+import { register as registerRank } from "./rank";
 import { register as registerScrape } from "./scrape";
 
 /**
@@ -19,5 +20,6 @@ export const registrars: Array<(program: Command) => void> = [
   registerEval,
   registerGolden,
   registerOutcome,
+  registerRank,
   registerScrape,
 ];
