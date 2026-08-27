@@ -122,6 +122,7 @@ export const profiles = pgTable("profiles", {
   displayName: text("display_name"),
   isOwner: boolean("is_owner").notNull().default(false),
   dailyBudgetUsd: numeric("daily_budget_usd", { precision: 10, scale: 2 })
+  contact: jsonb("contact").$type<{ name?: string; email?: string; phone?: string; links?: string[] }>(),
     .notNull()
     .default("1.00"),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -345,6 +346,7 @@ export const approvals = pgTable("approvals", {
 });
 
 export const evalItems = pgTable("eval_items", {
+  sampleGenerationId: uuid("sample_generation_id"),
   id: uuid("id").primaryKey().defaultRandom(),
   jobId: uuid("job_id").references(() => jobs.id),
   profileSnapshot: jsonb("profile_snapshot").$type<Fact[]>(),
