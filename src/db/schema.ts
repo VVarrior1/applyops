@@ -175,6 +175,8 @@ export const searchPrefs = pgTable("search_prefs", {
   workAuth: text("work_auth"),
   keywords: text("keywords").array(),
   excludedCompanies: text("excluded_companies").array(),
+  // ISO-3166 alpha-2 codes the user will work in; jobs with unknown country always pass
+  countries: text("countries").array().default(["CA", "US"]),
 });
 
 export const companies = pgTable(
@@ -214,6 +216,8 @@ export const jobs = pgTable(
     postedAt: timestamp("posted_at", { withTimezone: true }),
     scrapedAt: timestamp("scraped_at", { withTimezone: true }),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    // ISO-3166 alpha-2 codes detected from the location (null = not yet detected, [] = unknown/anywhere)
+    countries: text("countries").array(),
     // Set false by `runFinders` for postings no board has listed for 30 days
     // (spec §6). Rows are never deleted — an application may point at a job
     // that has since been taken down, and the funnel still has to explain it.

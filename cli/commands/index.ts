@@ -7,6 +7,7 @@ import { register as registerGolden } from "./golden";
 import { register as registerOutcome } from "./outcome";
 import { register as registerRank } from "./rank";
 import { register as registerScrape } from "./scrape";
+import { register as registerJobs } from "./jobs";
 
 /**
  * Each CLI command lives in its own file and exports `register(program)`.
@@ -19,6 +20,7 @@ export const registrars: Array<(program: Command) => void> = [
   registerCompanies,
   registerEval,
   registerGolden,
+  registerJobs,
   registerOutcome,
   registerRank,
   registerScrape,
