@@ -255,7 +255,6 @@ built on Microsoft's official Playwright base) the agent is forced into
 nobody at the terminal to answer the approval prompt; running for real
 requires an interactive TTY and a deliberate override.
 
-![The Applications dashboard — every application and its outcome buttons](docs/img/applications.png)
 
 ## 7. Cost & abuse controls
 
