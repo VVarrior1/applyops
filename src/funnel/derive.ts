@@ -23,8 +23,6 @@
  * counts. See `buildRow` below.
  */
 
-import { format } from "date-fns";
-
 export type OutcomeEventType =
   | "applied"
   | "viewed"
@@ -159,9 +157,40 @@ export function wilson95(successes: number, total: number): [number, number] {
   return [Math.max(0, lower), Math.min(1, upper)];
 }
 
-/** ISO 8601 week key, e.g. `"2026-W35"` — ISO week-numbering year (`RRRR`), not calendar year, so the last/first days of a year group with the week they actually belong to. */
+/**
+ * ISO 8601 week key, e.g. `"2026-W35"` — ISO week-numbering year, not
+ * calendar year, so the last/first days of a year group with the week they
+ * actually belong to.
+ *
+ * Computed against the UTC calendar date rather than via `date-fns`'s
+ * `format()`, which resolves in the *local* timezone of whatever process
+ * runs it. `createdAt` timestamps are stored/passed as UTC instants
+ * (`"2026-09-07T00:00:00Z"`); formatting one in, say, America/Edmonton
+ * (UTC-6) rolls it back to the previous calendar day and a different ISO
+ * week, so the same input produced different funnel buckets on a
+ * contributor's Mac than on a UTC CI runner. Bucketing must be
+ * environment-independent, so this reimplements the standard ISO week
+ * algorithm entirely on `Date`'s UTC getters/setters.
+ */
 function isoWeekKey(date: Date): string {
-  return format(date, "RRRR-'W'II");
+  const d = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+  // ISO weeks start Monday; shift to that week's Thursday, whose calendar
+  // year is by definition the ISO week-numbering year.
+  const isoDayNum = (d.getUTCDay() + 6) % 7; // Mon=0 .. Sun=6
+  d.setUTCDate(d.getUTCDate() - isoDayNum + 3);
+  const isoYear = d.getUTCFullYear();
+
+  const firstThursday = new Date(Date.UTC(isoYear, 0, 4));
+  const firstIsoDayNum = (firstThursday.getUTCDay() + 6) % 7;
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstIsoDayNum + 3);
+
+  const weekNum =
+    1 +
+    Math.round((d.getTime() - firstThursday.getTime()) / (7 * 86400000));
+
+  return `${isoYear}-W${String(weekNum).padStart(2, "0")}`;
 }
 
 function groupKey(app: FunnelApplication, groupBy: FunnelGroupBy): string {
