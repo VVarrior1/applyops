@@ -6,7 +6,7 @@ import { getDb } from "@/src/db/client";
 import { companies, jobs, jobScores } from "@/src/db/schema";
 import { DEFAULT_MODEL_BY_STEP } from "@/src/llm/defaults";
 import type { FitOutput } from "@/src/pipeline/schemas";
-import { ensureAnalysis, fitRankerVersion, KEYWORD_RANKER_VERSION } from "@/src/rank/rank";
+import { fitRankerVersion, KEYWORD_RANKER_VERSION } from "@/src/rank/rank";
 import { FitTab } from "@/components/jobs/FitTab";
 import { PostingTab } from "@/components/jobs/PostingTab";
 import { SuggestionsTab } from "@/components/jobs/SuggestionsTab";
@@ -19,13 +19,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
  * inside Task 9's Tailor tab, not a separate tab component — see that
  * task's notes on this file).
  *
- * Eagerly ensures `jobs.analysis` is populated (best-effort: a failure here
- * is swallowed, not thrown, so a flaky/over-budget LLM call never breaks
- * the whole page — the Fit tab's own button retries and surfaces the real
- * error). This is what Task 9's `/tailor`/`/suggest` 409 message means by
- * "Open the Posting or Fit tab first": simply landing on this page is what
- * runs `analyze`, once, ever, for this job — every later visit by anyone
- * hits the cache.
+ * Deliberately does *not* run `analyze` itself — this is a GET render, and
+ * a paid LLM call plus a DB write has no business happening on a plain page
+ * load: a `next/link` prefetch from `/jobs`, a refresh, or a crawler could
+ * all spend the viewing user's daily budget without them clicking anything.
+ * `initialAnalyzed` just reflects whatever `jobs.analysis` already is. The
+ * Fit tab (`FitTab`) is what actually runs `analyze` (via
+ * `POST /api/jobs/[id]/analyze`) then `fit`, from its own explicit "Score
+ * this job" button — Task 9's Tailor/Suggestions tabs should call the same
+ * `/analyze` route themselves rather than rely on a side effect here.
  */
 export default async function JobDetailPage({
   params,
@@ -58,16 +60,7 @@ export default async function JobDetailPage({
     notFound();
   }
 
-  let analysis = jobRow.analysis;
-  if (!analysis) {
-    try {
-      const ensured = await ensureAnalysis(db, user.id, jobRow);
-      analysis = ensured.analysis;
-    } catch {
-      // Best-effort — the Fit tab's "Score this job" button retries this
-      // exact call and surfaces the real error if it keeps failing.
-    }
-  }
+  const analysis = jobRow.analysis;
 
   const fitVersion = fitRankerVersion(DEFAULT_MODEL_BY_STEP.fit);
   const scoreRows = await db

@@ -102,7 +102,10 @@ export function register(program: Command): void {
       }
 
       for (const target of targets) {
-        const result = await rankForUser(db, target.userId, { maxJobs: opts.max });
+        const result = await rankForUser(db, target.userId, {
+          maxJobs: opts.max,
+          log: (line) => console.log(`  [${target.email}] ${line}`),
+        });
         console.log(
           `${target.email}: scored ${result.scored} · skipped ${result.skipped} · ` +
             `cost $${result.costUsd.toFixed(4)}`,

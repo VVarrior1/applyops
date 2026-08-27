@@ -21,7 +21,7 @@
  * per-job failure is caught, counted as `skipped`, and the run continues —
  * the same "one bad item never kills the batch" shape as `runFinders`).
  */
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { companies, jobs, jobScores } from "../db/schema";
 import { isPreferredLocation } from "../finders/filters";
@@ -92,6 +92,18 @@ export async function loadJobForScoring(db: Db, jobId: string): Promise<Rankable
   return row ?? null;
 }
 
+/**
+ * Just enough to run `isPreferredLocation` and order the pool — deliberately
+ * excludes `description`/`analysis` (up to a few KB each) which
+ * {@link CANDIDATE_POOL_LIMIT} rows of would otherwise pull ~6 MB over the
+ * pooler on every rank invocation just to discard all but `maxJobs` of them.
+ */
+const CANDIDATE_ID_COLUMNS = {
+  id: jobs.id,
+  location: jobs.location,
+  remote: jobs.remote,
+} as const;
+
 async function selectCandidateJobs(
   db: Db,
   userId: string,
@@ -99,10 +111,9 @@ async function selectCandidateJobs(
   prefs: SearchPrefsRow | null,
   maxJobs: number,
 ): Promise<RankableJob[]> {
-  const rows = await db
-    .select(JOB_SELECT_COLUMNS)
+  const idRows = await db
+    .select(CANDIDATE_ID_COLUMNS)
     .from(jobs)
-    .leftJoin(companies, eq(jobs.companyId, companies.id))
     .leftJoin(
       jobScores,
       and(
@@ -127,9 +138,29 @@ async function selectCandidateJobs(
     .limit(CANDIDATE_POOL_LIMIT);
 
   const prefsArg = prefs ? { locations: prefs.locations ?? [], remote: prefs.remote ?? "any" } : undefined;
-  return rows
+  const ids = idRows
     .filter((row) => isPreferredLocation(row.location, row.remote ?? false, prefsArg))
-    .slice(0, maxJobs);
+    .slice(0, maxJobs)
+    .map((row) => row.id);
+  if (ids.length === 0) return [];
+
+  // Second pass: fetch the full columns (description, cached analysis) only
+  // for the ≤maxJobs ids that survived the filter — never for the pool.
+  const fullRows = await db
+    .select(JOB_SELECT_COLUMNS)
+    .from(jobs)
+    .leftJoin(companies, eq(jobs.companyId, companies.id))
+    .where(inArray(jobs.id, ids));
+
+  const byId = new Map(fullRows.map((row) => [row.id, row]));
+  // Re-order to the id list, not the DB's return order, to keep "newest
+  // first" — `inArray` gives no ordering guarantee of its own.
+  const ordered: RankableJob[] = [];
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (row) ordered.push(row);
+  }
+  return ordered;
 }
 
 interface UpsertJobScoreInput {
@@ -310,6 +341,14 @@ export async function scoreFit(
 export interface RankForUserOptions {
   /** Defaults to {@link DEFAULT_MAX_JOBS}. */
   maxJobs?: number;
+  /**
+   * Called once per per-job failure that isn't a {@link BudgetExceededError}
+   * (which stops the loop instead) — same shape as `runFinders`' `ctx.log`.
+   * Without this the CLI/route only ever see the aggregate `skipped` count,
+   * with no way to tell a systemic failure (provider down, schema rejection,
+   * DB error) from a handful of genuinely bad postings.
+   */
+  log?: (line: string) => void;
 }
 
 export interface RankForUserResult {
@@ -352,6 +391,7 @@ export async function rankForUser(
     } catch (err) {
       if (err instanceof BudgetExceededError) break;
       skipped++;
+      opts.log?.(`${job.id} ${job.title}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

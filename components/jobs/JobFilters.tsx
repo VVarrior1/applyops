@@ -48,7 +48,7 @@ export function JobFilters({ value }: { value: JobFiltersValue }) {
     >
       <div className="flex flex-col gap-1">
         <label htmlFor="minScore" className="text-xs text-muted-foreground">
-          Min score
+          Min fit score (0–100)
         </label>
         <Input
           id="minScore"

@@ -42,9 +42,15 @@ function parseMinScore(value: string | undefined): number | null {
  * Restricted to `active ∧ is_entry_level ∧ is_relevant_role`, same as
  * `rankForUser`'s candidate pool (`src/rank/rank.ts`) — this page is "your
  * matches", not a firehose of all ~42k scraped postings (Task 7's notes).
- * Score is `COALESCE(fit-v1 score, keyword-v1 score)`: since the two scales
- * differ (0–100 vs 0–10), every fit-scored job naturally outranks every
- * keyword-only job, which is exactly "fit score, fallback keyword score".
+ * Score shown is `COALESCE(fit-v1 score, keyword-v1 score)`, but the two
+ * scales differ (0–100 vs 0–10) and this build's live data has fit scores
+ * as low as 0 and keyword scores as high as 9, so a naive
+ * `ORDER BY COALESCE(...)` can sort a keyword-only row above a fit-scored
+ * one. The `ORDER BY` below sorts every fit-scored row ahead of every
+ * keyword-only row as a block first, *then* by the (now same-block, so
+ * comparable) coalesced score — that's what makes "fit score, fallback
+ * keyword score" true. `minScore` filters the fit score alone (see below),
+ * not this mixed value.
  */
 export default async function JobsPage({
   searchParams,
@@ -80,7 +86,11 @@ export default async function JobsPage({
     conditions.push(eq(companies.atsVendor, filters.vendor as AtsVendor));
   }
   if (filters.minScore !== null) {
-    conditions.push(gte(sql`coalesce(${fitScores.score}, ${kwScores.score})`, filters.minScore));
+    // Fit score alone (0–100 scale, matching the input's 0–100 range) —
+    // never the keyword score (0–10). A job with no fit score yet is
+    // excluded rather than compared on the wrong scale; it still shows up
+    // once minScore is cleared or the job gets fit-scored.
+    conditions.push(gte(fitScores.score, filters.minScore));
   }
 
   const rows = await db
@@ -115,6 +125,10 @@ export default async function JobsPage({
     )
     .where(and(...conditions))
     .orderBy(
+      // Every fit-scored row (any fit score, including 0) ahead of every
+      // keyword-only row, as a block — the two scales are not comparable
+      // directly (see the file header).
+      sql`(${fitScores.score} IS NOT NULL) DESC`,
       sql`coalesce(${fitScores.score}, ${kwScores.score}) DESC NULLS LAST`,
       sql`${jobs.postedAt} DESC NULLS LAST`,
     )

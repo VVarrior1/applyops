@@ -35,6 +35,15 @@ const WORK_AUTH_LABEL: Record<string, string> = {
   needs_us_auth: "Needs US auth",
 };
 
+/**
+ * Batch size for one "Rank more" click. Small on purpose: each job costs a
+ * sequential `analyze` + `fit` LLM round trip inside the `/api/rank` route
+ * handler, and this button can be clicked repeatedly rather than needing to
+ * request everything in one request. Bulk ranking has no such constraint —
+ * that's `applyops rank --max`, run outside a request/response cycle.
+ */
+const RANK_MORE_BATCH_SIZE = 5;
+
 async function parseErrorBody(res: Response): Promise<string> {
   try {
     const body = (await res.json()) as { error?: string };
@@ -65,7 +74,7 @@ export function JobList({ jobs }: { jobs: JobListItem[] }) {
       const res = await fetch("/api/rank", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ maxJobs: RANK_MORE_BATCH_SIZE }),
       });
       if (!res.ok) {
         setError(await parseErrorBody(res));
