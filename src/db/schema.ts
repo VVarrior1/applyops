@@ -445,10 +445,19 @@ export const guides = pgTable(
   "guides",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    // `onDelete` matters here in a way it does not for the older tables:
+    // `deleteUserData()` (src/profile/facts.ts) deletes a user's rows table by
+    // table in a fixed order and knows nothing about these three. Cascading
+    // from `profiles` — and nulling the generation link, since that user's
+    // `generations` rows are deleted in the same transaction — is what keeps
+    // "Delete my data" working without that function having to enumerate every
+    // table added after it.
     userId: uuid("user_id")
       .notNull()
-      .references(() => profiles.userId),
-    generationId: uuid("generation_id").references(() => generations.id),
+      .references(() => profiles.userId, { onDelete: "cascade" }),
+    generationId: uuid("generation_id").references(() => generations.id, {
+      onDelete: "set null",
+    }),
     output: jsonb("output").$type<GuideOutput>().notNull(),
     modelId: text("model_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -470,7 +479,7 @@ export const chatThreads = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
-      .references(() => profiles.userId),
+      .references(() => profiles.userId, { onDelete: "cascade" }),
     title: text("title"),
     modelId: text("model_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -491,7 +500,7 @@ export const chatMessages = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     threadId: uuid("thread_id")
       .notNull()
-      .references(() => chatThreads.id),
+      .references(() => chatThreads.id, { onDelete: "cascade" }),
     role: chatRoleEnum("role").notNull(),
     content: text("content").notNull(),
     modelId: text("model_id"),
