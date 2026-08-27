@@ -14,11 +14,16 @@ import {
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { FACT_CATEGORIES } from "@/src/pipeline/schemas";
 import type { ProfileFactRecord } from "@/src/profile/facts";
+import { groupFacts } from "@/src/profile/group-facts";
 
 interface Row extends ProfileFactRecord {
   dirty: boolean;
   saving: boolean;
 }
+
+/** Categories collapsed to a chip summary by default — see plan Task 17. */
+const COLLAPSED_BY_DEFAULT = new Set(["skill"]);
+const COLLAPSED_PREVIEW_COUNT = 8;
 
 async function parseErrorBody(res: Response): Promise<string> {
   try {
@@ -37,9 +42,22 @@ export function FactsEditor({ initialFacts }: { initialFacts: ProfileFactRecord[
   const [newText, setNewText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   function patchRow(label: string, patch: Partial<Row>) {
     setRows((prev) => prev.map((r) => (r.label === label ? { ...r, ...patch } : r)));
+  }
+
+  function toggleExpanded(category: string) {
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
+      return next;
+    });
   }
 
   async function saveRow(label: string) {
@@ -121,10 +139,59 @@ export function FactsEditor({ initialFacts }: { initialFacts: ProfileFactRecord[
     }
   }
 
-  return (
-    <div className="flex flex-col gap-4">
-      {error && <p className="text-sm text-destructive">{error}</p>}
+  const groups = groupFacts(rows);
 
+  function renderRow(row: Row) {
+    return (
+      <TableRow key={row.label}>
+        <TableCell className="align-top font-mono text-xs text-muted-foreground">
+          {row.label}
+        </TableCell>
+        <TableCell className="align-top">
+          <Select
+            value={row.category}
+            onValueChange={(value) =>
+              patchRow(row.label, { category: value as string, dirty: true })
+            }
+          >
+            <SelectTrigger size="sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FACT_CATEGORIES.map((category) => (
+                <SelectItem key={category} value={category}>
+                  {category}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </TableCell>
+        <TableCell className="align-top">
+          <Textarea
+            value={row.text}
+            rows={2}
+            onChange={(event) => patchRow(row.label, { text: event.target.value, dirty: true })}
+          />
+        </TableCell>
+        <TableCell className="align-top">
+          <Badge variant="outline">{row.source === "resume_upload" ? "resume" : "manual"}</Badge>
+        </TableCell>
+        <TableCell className="flex flex-col items-end gap-1.5 align-top">
+          {row.dirty && (
+            <Button size="sm" disabled={row.saving} onClick={() => saveRow(row.label)}>
+              {row.saving ? "Saving…" : "Save"}
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => deleteRow(row.label)}>
+            Delete
+          </Button>
+        </TableCell>
+      </TableRow>
+    );
+  }
+
+  function renderGroupTable(groupRows: Row[]) {
+    return (
       <Table>
         <TableHeader>
           <TableRow>
@@ -135,64 +202,60 @@ export function FactsEditor({ initialFacts }: { initialFacts: ProfileFactRecord[
             <TableHead className="w-0" />
           </TableRow>
         </TableHeader>
-        <TableBody>
-          {rows.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                No facts yet — upload a resume in Onboarding, or add one below.
-              </TableCell>
-            </TableRow>
-          )}
-          {rows.map((row) => (
-            <TableRow key={row.label}>
-              <TableCell className="align-top font-mono text-xs text-muted-foreground">
-                {row.label}
-              </TableCell>
-              <TableCell className="align-top">
-                <Select
-                  value={row.category}
-                  onValueChange={(value) =>
-                    patchRow(row.label, { category: value as string, dirty: true })
-                  }
-                >
-                  <SelectTrigger size="sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FACT_CATEGORIES.map((category) => (
-                      <SelectItem key={category} value={category}>
-                        {category}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </TableCell>
-              <TableCell className="align-top">
-                <Textarea
-                  value={row.text}
-                  rows={2}
-                  onChange={(event) =>
-                    patchRow(row.label, { text: event.target.value, dirty: true })
-                  }
-                />
-              </TableCell>
-              <TableCell className="align-top">
-                <Badge variant="outline">{row.source === "resume_upload" ? "resume" : "manual"}</Badge>
-              </TableCell>
-              <TableCell className="flex flex-col items-end gap-1.5 align-top">
-                {row.dirty && (
-                  <Button size="sm" disabled={row.saving} onClick={() => saveRow(row.label)}>
-                    {row.saving ? "Saving…" : "Save"}
-                  </Button>
-                )}
-                <Button size="sm" variant="ghost" onClick={() => deleteRow(row.label)}>
-                  Delete
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
+        <TableBody>{groupRows.map((row) => renderRow(row))}</TableBody>
       </Table>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {rows.length === 0 && (
+        <p className="text-center text-sm text-muted-foreground">
+          No facts yet — upload a resume in Onboarding, or add one below.
+        </p>
+      )}
+
+      <div className="flex flex-col gap-5">
+        {groups.map((group) => {
+          const collapsible = COLLAPSED_BY_DEFAULT.has(group.category);
+          const expanded = expandedCategories.has(group.category);
+          const showFull = !collapsible || expanded;
+
+          return (
+            <div key={group.category} className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold">{group.label}</h3>
+                <Badge variant="secondary">{group.count}</Badge>
+              </div>
+
+              {showFull ? (
+                renderGroupTable(group.facts)
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    {group.facts.slice(0, COLLAPSED_PREVIEW_COUNT).map((row) => (
+                      <Badge key={row.label} variant="outline">
+                        {row.text}
+                      </Badge>
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="self-start"
+                    onClick={() => toggleExpanded(group.category)}
+                  >
+                    Show all {group.count}
+                  </Button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
 
       <form onSubmit={handleAdd} className="flex flex-col gap-2 rounded-lg border p-3">
         <p className="text-sm font-medium">Add a fact</p>
