@@ -7,6 +7,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import type { Command } from "commander";
 import { getDb } from "../../src/db/client";
 import type { Step } from "../../src/db/schema";
@@ -18,6 +19,11 @@ import {
   renderConsoleTable,
   writeReports,
 } from "../../src/eval/report";
+import {
+  evaluateGate,
+  gateExitCode,
+  renderGateSummaryMarkdown,
+} from "../../src/eval/gate";
 import { runEval } from "../../src/eval/runner";
 
 const STEPS = ["analyze", "fit", "tailor", "suggest", "judge", "extract_facts"] as const;
@@ -33,6 +39,14 @@ function parsePositiveInt(value: string, label: string): number {
   const n = Number(value);
   if (!Number.isInteger(n) || n <= 0) {
     throw new Error(`${label} must be a positive integer, got "${value}"`);
+  }
+  return n;
+}
+
+function parseRate(value: string, label: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 1) {
+    throw new Error(`${label} must be a fraction between 0 and 1, got "${value}"`);
   }
   return n;
 }
@@ -73,6 +87,15 @@ export function register(program: Command): void {
     .option("-c, --concurrency <n>", "items evaluated in parallel", "3")
     .option("--seed <n>", "bootstrap seed (determinism)")
     .option("--git-sha <sha>", "override the recorded commit")
+    .option(
+      "--gate",
+      "apply the CI quality gate: exit 1 on a regression and write a job summary (spec §7)",
+      false,
+    )
+    .option(
+      "--max-hallucination-rate <rate>",
+      "override the gate's hallucination ceiling (default 0.02)",
+    )
     .action(
       async (options: {
         step: string;
@@ -85,6 +108,8 @@ export function register(program: Command): void {
         concurrency: string;
         seed?: string;
         gitSha?: string;
+        gate: boolean;
+        maxHallucinationRate?: string;
       }) => {
         const db = getDb();
         const step = parseStep(options.step);
@@ -133,7 +158,29 @@ export function register(program: Command): void {
         const written = writeReports(summary, summary.results, options.out);
         console.log(`\nReports:\n  ${written.json}\n  ${written.html}\n`);
 
-        process.exit(0);
+        if (!options.gate) process.exit(0);
+
+        // --- CI gate (spec §7, src/eval/gate.ts) -------------------------
+        const gate = evaluateGate(summary, {
+          maxHallucinationRate: options.maxHallucinationRate
+            ? parseRate(options.maxHallucinationRate, "--max-hallucination-rate")
+            : undefined,
+        });
+
+        for (const check of gate.checks) {
+          const mark = check.status === "pass" ? "PASS" : check.status === "fail" ? "FAIL" : "SKIP";
+          console.log(`  [${mark}] ${check.name}: ${check.detail}`);
+        }
+        console.log(`\nEval gate: ${gate.pass ? "PASS" : "FAIL"}\n`);
+
+        // GitHub Actions surfaces this on the run page. Appended, never
+        // overwritten: other steps in the same job write here too.
+        const stepSummary = process.env.GITHUB_STEP_SUMMARY;
+        if (stepSummary) {
+          fs.appendFileSync(stepSummary, renderGateSummaryMarkdown(summary, gate), "utf8");
+        }
+
+        process.exit(gateExitCode(gate));
       },
     );
 }
