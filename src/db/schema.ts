@@ -14,6 +14,7 @@ import {
   index,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import type {
   AnalyzeOutput,
   FitOutput,
@@ -29,10 +30,13 @@ import type {
  * on top as defense in depth (see drizzle/0001_rls.sql).
  *
  * Table order below is chosen to avoid forward-reference foreign keys where
- * possible. The one genuine cycle (jobs.analysis_generation_id <->
- * generations.job_id) is broken by leaving `analysis_generation_id` as a
- * soft (unconstrained) uuid pointer — it is an audit trail, not a
- * referential-integrity-critical link.
+ * possible. `jobs.analysis_generation_id` and `generations.job_id` form a
+ * genuine cycle (each table references a row in the other), but that's just
+ * a forward reference at the TypeScript level, not a problem for Postgres:
+ * drizzle-kit emits every foreign key as its own `ALTER TABLE ... ADD
+ * CONSTRAINT` statement after all `CREATE TABLE`s run, so both directions of
+ * the cycle are expressible. Both columns use the `(): AnyPgColumn => ...`
+ * thunk idiom to reference a table declared later in this file.
  *
  * `profiles.user_id` is NOT declared with a drizzle `.references()` to
  * Supabase's `auth.users` table: `auth.users` is managed by Supabase Auth
@@ -179,6 +183,12 @@ export const companies = pgTable(
   },
   (t) => [
     uniqueIndex("companies_vendor_slug_uq").on(t.atsVendor, t.atsSlug),
+    // (ats_vendor, ats_slug) constrains nothing for rows with a null slug
+    // (Postgres treats NULLs as distinct) — which is every company the v1
+    // seed creates. This second index is what actually makes company
+    // upserts idempotent for those rows; see upsertCompanyByName in
+    // src/db/seed-v1.ts.
+    uniqueIndex("companies_name_lower_uq").on(sql`lower(${t.name})`),
   ],
 );
 
@@ -200,8 +210,9 @@ export const jobs = pgTable(
     isRelevantRole: boolean("is_relevant_role"),
     workAuthSignal: workAuthSignalEnum("work_auth_signal"),
     analysis: jsonb("analysis").$type<AnalyzeOutput>(),
-    // Soft pointer to generations.id (see file header) — no FK constraint.
-    analysisGenerationId: uuid("analysis_generation_id"),
+    analysisGenerationId: uuid("analysis_generation_id").references(
+      (): AnyPgColumn => generations.id,
+    ),
   },
   (t) => [
     uniqueIndex("jobs_url_uq").on(t.url),

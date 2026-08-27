@@ -1,0 +1,2 @@
+ALTER TABLE "jobs" ADD CONSTRAINT "jobs_analysis_generation_id_generations_id_fk" FOREIGN KEY ("analysis_generation_id") REFERENCES "public"."generations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "companies_name_lower_uq" ON "companies" USING btree (lower("name"));

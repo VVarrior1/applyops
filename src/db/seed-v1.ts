@@ -1,14 +1,13 @@
 import dotenv from "dotenv";
-dotenv.config({ path: ".env.local", quiet: true });
-
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import Papa from "papaparse";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { getDirectDb } from "./client";
-import { applications, companies, jobs, outcomeEvents, profiles } from "./schema";
+import { applications, jobs, outcomeEvents, profiles } from "./schema";
 import type * as schema from "./schema";
 
 /**
@@ -30,12 +29,22 @@ import type * as schema from "./schema";
  *    filters (Task 7) run on these jobs.
  *  - applications: one row per applications.csv row, owned by OWNER_EMAIL
  *    (profile created if missing, is_owner=true), with an `applied`
- *    outcome_event at the row's created_at; an extra `interview` or
- *    `rejected` event is added when that application's v1 job has that
- *    status.
+ *    outcome_event at the row's created_at; an extra outcome_event
+ *    (`interview`, `rejected`, or `response` for v1 status `reviewing`) is
+ *    added when that application's v1 job has that status.
  */
 
-const V1_DATA_DIR = "/Users/abdu/Job_Auto_Apply/data";
+// Resolve `.env.local` relative to the repo root (not `process.cwd()`), so
+// this script works when invoked from anywhere, not just the repo root.
+dotenv.config({
+  path: path.resolve(fileURLToPath(import.meta.url), "../../..", ".env.local"),
+  quiet: true,
+});
+
+// v1's data directory lives only on the machine that ran v1 — override with
+// V1_DATA_DIR for CI or any other machine. If it's absent, skip the seed
+// with a clear message instead of an opaque ENOENT.
+const V1_DATA_DIR = process.env.V1_DATA_DIR ?? "/Users/abdu/Job_Auto_Apply/data";
 const V1_JOBS_CSV = path.join(V1_DATA_DIR, "jobs.csv");
 const V1_APPLICATIONS_CSV = path.join(V1_DATA_DIR, "applications.csv");
 
@@ -90,9 +99,13 @@ function toBool(value: string | undefined): boolean | undefined {
 
 type Db = PostgresJsDatabase<typeof schema>;
 
-/** Upsert a company by exact name match (companies has no unique index on
- * name — the unique constraint is (ats_vendor, ats_slug), which v1 imports
- * never populate — so idempotency here is app-level select-then-insert). */
+/** Upsert a company by name, case-insensitively, in a single atomic
+ * statement — relies on the `companies_name_lower_uq` unique index on
+ * `lower(name)` (see src/db/schema.ts). Drizzle's typed `onConflictDoUpdate`
+ * only accepts column targets, not expression-index targets, so this uses a
+ * raw `on conflict (lower(name))` upsert. Safe under concurrent callers
+ * (this seed script and Task 7's importV1Allowlists() both call this),
+ * unlike the previous select-then-insert version. */
 async function upsertCompanyByName(
   db: Db,
   cache: Map<string, string>,
@@ -102,22 +115,15 @@ async function upsertCompanyByName(
   const cached = cache.get(key);
   if (cached) return cached;
 
-  const existing = await db
-    .select({ id: companies.id })
-    .from(companies)
-    .where(eq(companies.name, key))
-    .limit(1);
-  if (existing.length > 0) {
-    cache.set(key, existing[0].id);
-    return existing[0].id;
-  }
-
-  const [created] = await db
-    .insert(companies)
-    .values({ name: key, atsVendor: "other", source: "v1_allowlist", active: true })
-    .returning({ id: companies.id });
-  cache.set(key, created.id);
-  return created.id;
+  const rows = (await db.execute(sql`
+    insert into companies (name, ats_vendor, source, active)
+    values (${key}, 'other', 'v1_allowlist', true)
+    on conflict (lower(name)) do update set name = excluded.name
+    returning id
+  `)) as unknown as Array<{ id: string }>;
+  const id = rows[0].id;
+  cache.set(key, id);
+  return id;
 }
 
 async function upsertJobByUrl(
@@ -174,6 +180,14 @@ async function ensureOwnerProfile(db: Db, userId: string): Promise<void> {
 }
 
 async function main() {
+  if (!fs.existsSync(V1_DATA_DIR)) {
+    console.log(
+      `[seed-v1] V1_DATA_DIR (${V1_DATA_DIR}) does not exist on this machine; skipping v1 seed. ` +
+        `Set V1_DATA_DIR to point at a checkout of Job_Auto_Apply/data to run it.`,
+    );
+    process.exit(0);
+  }
+
   const db = getDirectDb();
 
   const ownerEmail = process.env.OWNER_EMAIL;
@@ -243,21 +257,33 @@ async function main() {
       // v1's own data has orphaned references: applications.csv points at a
       // job_id no longer present in jobs.csv. Create a minimal placeholder
       // job (not counted in "jobs upserted") so the FK holds and the
-      // application's history isn't silently dropped.
-      const placeholderCompanyId = await upsertCompanyByName(
-        db,
-        companyCache,
-        "Unknown (v1 orphaned job)",
-      );
-      jobDbId = await upsertJobByUrl(db, `v1-orphan://${app.job_id}`, {
-        companyId: placeholderCompanyId,
-        title: `Unknown position (v1 job ${app.job_id})`,
-      });
+      // application's history isn't silently dropped. Check for an existing
+      // placeholder first so re-runs don't log/count a "new" one every time
+      // (upsertJobByUrl always upserts, so it alone can't tell us that).
+      const placeholderUrl = `v1-orphan://${app.job_id}`;
+      const existingPlaceholder = await db
+        .select({ id: jobs.id })
+        .from(jobs)
+        .where(eq(jobs.url, placeholderUrl))
+        .limit(1);
+      if (existingPlaceholder.length > 0) {
+        jobDbId = existingPlaceholder[0].id;
+      } else {
+        const placeholderCompanyId = await upsertCompanyByName(
+          db,
+          companyCache,
+          "Unknown (v1 orphaned job)",
+        );
+        jobDbId = await upsertJobByUrl(db, placeholderUrl, {
+          companyId: placeholderCompanyId,
+          title: `Unknown position (v1 job ${app.job_id})`,
+        });
+        orphanedPlaceholderJobs++;
+        console.warn(
+          `[seed-v1] application ${app.id} references job_id ${app.job_id}, not present in jobs.csv; created a placeholder job.`,
+        );
+      }
       v1JobIdToDbId.set(app.job_id, jobDbId);
-      orphanedPlaceholderJobs++;
-      console.warn(
-        `[seed-v1] application ${app.id} references job_id ${app.job_id}, not present in jobs.csv; created a placeholder job.`,
-      );
     }
 
     const createdAt = toDate(app.created_at) ?? new Date();
@@ -281,7 +307,9 @@ async function main() {
         ? "interviewing"
         : v1Job?.status === "rejected"
           ? "rejected"
-          : "applied";
+          : v1Job?.status === "reviewing"
+            ? "responded"
+            : "applied";
 
     const [createdApp] = await db
       .insert(applications)
@@ -301,11 +329,21 @@ async function main() {
       occurredAt: createdAt,
     });
 
-    if (v1Job?.status === "interview" || v1Job?.status === "rejected") {
+    if (
+      v1Job?.status === "interview" ||
+      v1Job?.status === "rejected" ||
+      v1Job?.status === "reviewing"
+    ) {
       const secondaryAt = toDate(v1Job.applied_at) ?? createdAt;
+      const secondaryType =
+        v1Job.status === "interview"
+          ? "interview"
+          : v1Job.status === "rejected"
+            ? "rejected"
+            : "response";
       await db.insert(outcomeEvents).values({
         applicationId: createdApp.id,
-        type: v1Job.status === "interview" ? "interview" : "rejected",
+        type: secondaryType,
         occurredAt: secondaryAt,
       });
     }

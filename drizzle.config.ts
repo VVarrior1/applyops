@@ -1,7 +1,14 @@
 import { defineConfig } from "drizzle-kit";
 import dotenv from "dotenv";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-dotenv.config({ path: ".env.local", quiet: true });
+// Resolve `.env.local` relative to the repo root (not `process.cwd()`), so
+// this config works when drizzle-kit is invoked from anywhere.
+dotenv.config({
+  path: path.resolve(fileURLToPath(import.meta.url), "..", ".env.local"),
+  quiet: true,
+});
 
 const url = process.env.DIRECT_DATABASE_URL;
 if (!url) {
