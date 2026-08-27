@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupFacts } from "../../src/profile/group-facts";
+import { groupFacts, isCollapsedByDefault, COLLAPSED_PREVIEW_COUNT } from "../../src/profile/group-facts";
 
 interface TestFact {
   category: string;
@@ -110,5 +110,24 @@ describe("groupFacts", () => {
     const groups = groupFacts(rows);
     expect(groups.map((g) => g.category)).toEqual(["experience", "skill"]);
     expect(groups[0].facts[0].label).toBe("F-002");
+  });
+});
+
+describe("isCollapsedByDefault", () => {
+  it("collapses skill sections once they exceed the preview count", () => {
+    expect(isCollapsedByDefault("skill", COLLAPSED_PREVIEW_COUNT + 1)).toBe(true);
+  });
+
+  it("does not collapse a skill section at or under the preview count — nothing to hide", () => {
+    expect(isCollapsedByDefault("skill", COLLAPSED_PREVIEW_COUNT)).toBe(false);
+    expect(isCollapsedByDefault("skill", 3)).toBe(false);
+    expect(isCollapsedByDefault("skill", 0)).toBe(false);
+  });
+
+  it("never collapses non-skill categories, regardless of size", () => {
+    expect(isCollapsedByDefault("experience", 100)).toBe(false);
+    expect(isCollapsedByDefault("project", 100)).toBe(false);
+    expect(isCollapsedByDefault("education", 100)).toBe(false);
+    expect(isCollapsedByDefault("other", 100)).toBe(false);
   });
 });

@@ -17,6 +17,31 @@
 /** Fixed section order: substantive categories first, high-volume "skill" last. */
 const CATEGORY_ORDER = ["experience", "project", "education", "other", "skill"] as const;
 
+/**
+ * Categories collapsed to a chip summary by default (when they have enough
+ * facts to be worth collapsing — see `COLLAPSED_PREVIEW_COUNT`). Exported so
+ * the onboarding facts review and the settings facts editor share this
+ * single policy instead of each declaring their own copy that can drift.
+ */
+const COLLAPSED_BY_DEFAULT = new Set(["skill"]);
+
+/**
+ * How many facts to show as preview chips in a collapsed section before the
+ * "Show all N" control. Also used as the threshold below which a
+ * default-collapsed category isn't collapsed at all — collapsing 3 chips
+ * behind a "Show all 3" button that reveals the same 3 items is pointless.
+ */
+export const COLLAPSED_PREVIEW_COUNT = 8;
+
+/**
+ * Whether `category` should render collapsed-by-default, given it has
+ * `count` facts. Small groups (at or under `COLLAPSED_PREVIEW_COUNT`) are
+ * never collapsed since there's nothing to hide.
+ */
+export function isCollapsedByDefault(category: string, count: number): boolean {
+  return COLLAPSED_BY_DEFAULT.has(category) && count > COLLAPSED_PREVIEW_COUNT;
+}
+
 const CATEGORY_LABELS: Record<string, string> = {
   experience: "Experience",
   project: "Projects",

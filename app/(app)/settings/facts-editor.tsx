@@ -14,16 +14,12 @@ import {
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { FACT_CATEGORIES } from "@/src/pipeline/schemas";
 import type { ProfileFactRecord } from "@/src/profile/facts";
-import { groupFacts } from "@/src/profile/group-facts";
+import { groupFacts, isCollapsedByDefault, COLLAPSED_PREVIEW_COUNT } from "@/src/profile/group-facts";
 
 interface Row extends ProfileFactRecord {
   dirty: boolean;
   saving: boolean;
 }
-
-/** Categories collapsed to a chip summary by default — see plan Task 17. */
-const COLLAPSED_BY_DEFAULT = new Set(["skill"]);
-const COLLAPSED_PREVIEW_COUNT = 8;
 
 async function parseErrorBody(res: Response): Promise<string> {
   try {
@@ -132,6 +128,9 @@ export function FactsEditor({ initialFacts }: { initialFacts: ProfileFactRecord[
       const body = (await res.json()) as { facts: ProfileFactRecord[] };
       setRows((prev) => [...prev, ...body.facts.map((f) => ({ ...f, dirty: false, saving: false }))]);
       setNewText("");
+      // Make sure the newly added fact is actually visible, even if it landed
+      // in a section that's collapsed by default (e.g. adding a "skill").
+      setExpandedCategories((prev) => new Set(prev).add(newCategory));
     } catch {
       setError("Couldn't reach the server. Try again.");
     } finally {
@@ -219,9 +218,14 @@ export function FactsEditor({ initialFacts }: { initialFacts: ProfileFactRecord[
 
       <div className="flex flex-col gap-5">
         {groups.map((group) => {
-          const collapsible = COLLAPSED_BY_DEFAULT.has(group.category);
+          const collapsible = isCollapsedByDefault(group.category, group.count);
           const expanded = expandedCategories.has(group.category);
-          const showFull = !collapsible || expanded;
+          // Never hide a row with unsaved state: if the owner recategorizes a
+          // fact into a collapsed section (or a save is still in flight
+          // there), force that section open so the Save control stays
+          // reachable instead of stranding an edit no one can see.
+          const hasUnsaved = group.facts.some((row) => row.dirty || row.saving);
+          const showFull = !collapsible || expanded || hasUnsaved;
 
           return (
             <div key={group.category} className="flex flex-col gap-2">
@@ -231,7 +235,20 @@ export function FactsEditor({ initialFacts }: { initialFacts: ProfileFactRecord[
               </div>
 
               {showFull ? (
-                renderGroupTable(group.facts)
+                <div className="flex flex-col gap-2">
+                  {renderGroupTable(group.facts)}
+                  {collapsible && expanded && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="self-start"
+                      onClick={() => toggleExpanded(group.category)}
+                    >
+                      Show less
+                    </Button>
+                  )}
+                </div>
               ) : (
                 <div className="flex flex-col gap-2">
                   <div className="flex flex-wrap gap-1.5">

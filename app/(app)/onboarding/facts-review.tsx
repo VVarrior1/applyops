@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { FACT_CATEGORIES, type ExtractFactsOutput } from "@/src/pipeline/schemas";
 import type { ProfileFactRecord } from "@/src/profile/facts";
-import { groupFacts } from "@/src/profile/group-facts";
+import { groupFacts, isCollapsedByDefault, COLLAPSED_PREVIEW_COUNT } from "@/src/profile/group-facts";
 
 interface DraftFact {
   id: number;
@@ -21,11 +21,11 @@ interface DraftFact {
   text: string;
   evidenceSpan: string;
   keep: boolean;
+  /** Set once the owner edits this draft (category or text), so a
+   * recategorize into a collapsed section can't make a card the owner is
+   * mid-edit in silently vanish into the chip preview. */
+  edited: boolean;
 }
-
-/** Categories collapsed to a chip summary by default — see plan Task 17. */
-const COLLAPSED_BY_DEFAULT = new Set(["skill"]);
-const COLLAPSED_PREVIEW_COUNT = 8;
 
 async function parseErrorBody(res: Response): Promise<string> {
   try {
@@ -50,6 +50,7 @@ export function FactsReview({
       text: fact.text,
       evidenceSpan: fact.evidence_span,
       keep: true,
+      edited: false,
     })),
   );
   const [saving, setSaving] = useState(false);
@@ -57,7 +58,7 @@ export function FactsReview({
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   function update(id: number, patch: Partial<DraftFact>) {
-    setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+    setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch, edited: true } : d)));
   }
 
   function toggleExpanded(category: string) {
@@ -168,9 +169,13 @@ export function FactsReview({
 
       <div className="flex flex-col gap-5">
         {groups.map((group) => {
-          const collapsible = COLLAPSED_BY_DEFAULT.has(group.category);
+          const collapsible = isCollapsedByDefault(group.category, group.count);
           const expanded = expandedCategories.has(group.category);
-          const showFull = !collapsible || expanded;
+          // Never hide a card the owner is mid-edit in: if recategorizing a
+          // draft moves it into a collapsed section, keep that section open
+          // so the card (and its in-progress edit) stays visible.
+          const hasEdited = group.facts.some((draft) => draft.edited);
+          const showFull = !collapsible || expanded || hasEdited;
 
           return (
             <div key={group.category} className="flex flex-col gap-3">
@@ -182,6 +187,17 @@ export function FactsReview({
               {showFull ? (
                 <div className="flex flex-col gap-3">
                   {group.facts.map((draft) => renderDraftCard(draft))}
+                  {collapsible && expanded && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="self-start"
+                      onClick={() => toggleExpanded(group.category)}
+                    >
+                      Show less
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
