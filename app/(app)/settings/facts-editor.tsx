@@ -14,6 +14,7 @@ import {
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { FACT_CATEGORIES } from "@/src/pipeline/schemas";
 import type { ProfileFactRecord } from "@/src/profile/facts";
+import { groupFacts, isCollapsedByDefault, COLLAPSED_PREVIEW_COUNT } from "@/src/profile/group-facts";
 
 interface Row extends ProfileFactRecord {
   dirty: boolean;
@@ -37,9 +38,22 @@ export function FactsEditor({ initialFacts }: { initialFacts: ProfileFactRecord[
   const [newText, setNewText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   function patchRow(label: string, patch: Partial<Row>) {
     setRows((prev) => prev.map((r) => (r.label === label ? { ...r, ...patch } : r)));
+  }
+
+  function toggleExpanded(category: string) {
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
+      return next;
+    });
   }
 
   async function saveRow(label: string) {
@@ -114,6 +128,9 @@ export function FactsEditor({ initialFacts }: { initialFacts: ProfileFactRecord[
       const body = (await res.json()) as { facts: ProfileFactRecord[] };
       setRows((prev) => [...prev, ...body.facts.map((f) => ({ ...f, dirty: false, saving: false }))]);
       setNewText("");
+      // Make sure the newly added fact is actually visible, even if it landed
+      // in a section that's collapsed by default (e.g. adding a "skill").
+      setExpandedCategories((prev) => new Set(prev).add(newCategory));
     } catch {
       setError("Couldn't reach the server. Try again.");
     } finally {
@@ -121,10 +138,59 @@ export function FactsEditor({ initialFacts }: { initialFacts: ProfileFactRecord[
     }
   }
 
-  return (
-    <div className="flex flex-col gap-4">
-      {error && <p className="text-sm text-destructive">{error}</p>}
+  const groups = groupFacts(rows);
 
+  function renderRow(row: Row) {
+    return (
+      <TableRow key={row.label}>
+        <TableCell className="align-top font-mono text-xs text-muted-foreground">
+          {row.label}
+        </TableCell>
+        <TableCell className="align-top">
+          <Select
+            value={row.category}
+            onValueChange={(value) =>
+              patchRow(row.label, { category: value as string, dirty: true })
+            }
+          >
+            <SelectTrigger size="sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FACT_CATEGORIES.map((category) => (
+                <SelectItem key={category} value={category}>
+                  {category}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </TableCell>
+        <TableCell className="align-top">
+          <Textarea
+            value={row.text}
+            rows={2}
+            onChange={(event) => patchRow(row.label, { text: event.target.value, dirty: true })}
+          />
+        </TableCell>
+        <TableCell className="align-top">
+          <Badge variant="outline">{row.source === "resume_upload" ? "resume" : "manual"}</Badge>
+        </TableCell>
+        <TableCell className="flex flex-col items-end gap-1.5 align-top">
+          {row.dirty && (
+            <Button size="sm" disabled={row.saving} onClick={() => saveRow(row.label)}>
+              {row.saving ? "Saving…" : "Save"}
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => deleteRow(row.label)}>
+            Delete
+          </Button>
+        </TableCell>
+      </TableRow>
+    );
+  }
+
+  function renderGroupTable(groupRows: Row[]) {
+    return (
       <Table>
         <TableHeader>
           <TableRow>
@@ -135,64 +201,78 @@ export function FactsEditor({ initialFacts }: { initialFacts: ProfileFactRecord[
             <TableHead className="w-0" />
           </TableRow>
         </TableHeader>
-        <TableBody>
-          {rows.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                No facts yet — upload a resume in Onboarding, or add one below.
-              </TableCell>
-            </TableRow>
-          )}
-          {rows.map((row) => (
-            <TableRow key={row.label}>
-              <TableCell className="align-top font-mono text-xs text-muted-foreground">
-                {row.label}
-              </TableCell>
-              <TableCell className="align-top">
-                <Select
-                  value={row.category}
-                  onValueChange={(value) =>
-                    patchRow(row.label, { category: value as string, dirty: true })
-                  }
-                >
-                  <SelectTrigger size="sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FACT_CATEGORIES.map((category) => (
-                      <SelectItem key={category} value={category}>
-                        {category}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </TableCell>
-              <TableCell className="align-top">
-                <Textarea
-                  value={row.text}
-                  rows={2}
-                  onChange={(event) =>
-                    patchRow(row.label, { text: event.target.value, dirty: true })
-                  }
-                />
-              </TableCell>
-              <TableCell className="align-top">
-                <Badge variant="outline">{row.source === "resume_upload" ? "resume" : "manual"}</Badge>
-              </TableCell>
-              <TableCell className="flex flex-col items-end gap-1.5 align-top">
-                {row.dirty && (
-                  <Button size="sm" disabled={row.saving} onClick={() => saveRow(row.label)}>
-                    {row.saving ? "Saving…" : "Save"}
-                  </Button>
-                )}
-                <Button size="sm" variant="ghost" onClick={() => deleteRow(row.label)}>
-                  Delete
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
+        <TableBody>{groupRows.map((row) => renderRow(row))}</TableBody>
       </Table>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {rows.length === 0 && (
+        <p className="text-center text-sm text-muted-foreground">
+          No facts yet — upload a resume in Onboarding, or add one below.
+        </p>
+      )}
+
+      <div className="flex flex-col gap-5">
+        {groups.map((group) => {
+          const collapsible = isCollapsedByDefault(group.category, group.count);
+          const expanded = expandedCategories.has(group.category);
+          // Never hide a row with unsaved state: if the owner recategorizes a
+          // fact into a collapsed section (or a save is still in flight
+          // there), force that section open so the Save control stays
+          // reachable instead of stranding an edit no one can see.
+          const hasUnsaved = group.facts.some((row) => row.dirty || row.saving);
+          const showFull = !collapsible || expanded || hasUnsaved;
+
+          return (
+            <div key={group.category} className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold">{group.label}</h3>
+                <Badge variant="secondary">{group.count}</Badge>
+              </div>
+
+              {showFull ? (
+                <div className="flex flex-col gap-2">
+                  {renderGroupTable(group.facts)}
+                  {collapsible && expanded && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="self-start"
+                      onClick={() => toggleExpanded(group.category)}
+                    >
+                      Show less
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    {group.facts.slice(0, COLLAPSED_PREVIEW_COUNT).map((row) => (
+                      <Badge key={row.label} variant="outline">
+                        {row.text}
+                      </Badge>
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="self-start"
+                    onClick={() => toggleExpanded(group.category)}
+                  >
+                    Show all {group.count}
+                  </Button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
 
       <form onSubmit={handleAdd} className="flex flex-col gap-2 rounded-lg border p-3">
         <p className="text-sm font-medium">Add a fact</p>
