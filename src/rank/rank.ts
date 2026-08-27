@@ -2,9 +2,11 @@
  * `rankForUser` — the LLM ranker (spec §5 "Ranker v0", §6 "per-user ranking
  * budget").
  *
- * For one user: pick jobs that are active, entry-level, a relevant role, and
- * match their `search_prefs` (via `isPreferredLocation`, Task 7) and that
- * this ranker hasn't already scored for them; run `analyze` on each (only
+ * For one user: pick jobs that are active, entry-level, a relevant role,
+ * match their `search_prefs` (via `isPreferredLocation`, Task 7, and — when
+ * they have `roles` set — a title regex from `src/rank/role-titles.ts`, the
+ * same one `/jobs`' `roles=mine` filter uses), and that this ranker hasn't
+ * already scored for them; run `analyze` on each (only
  * when `jobs.analysis` is still null — analysis is per-job and cached,
  * shared across every user, spec §6) then `fit`; write both a
  * `fit-v1:<model>` `job_scores` row (the real ranking) and a `keyword-v1`
@@ -33,6 +35,7 @@ import type { AnalyzeOutput, Fact, FitOutput } from "../pipeline/schemas";
 import { getConfirmedFacts, getPrefs, type SearchPrefsRow } from "../profile/facts";
 import { candidateConditions } from "./candidates";
 import { keywordScore } from "./keyword";
+import { roleTitlePatternSource } from "./role-titles";
 
 /** `job_scores.ranker_version` for the free, deterministic baseline. */
 export const KEYWORD_RANKER_VERSION = "keyword-v1";
@@ -112,6 +115,12 @@ async function selectCandidateJobs(
   prefs: SearchPrefsRow | null,
   maxJobs: number,
 ): Promise<RankableJob[]> {
+  // Same title-vs-role-family regex the Jobs page's `roles=mine` filter
+  // uses (src/rank/role-titles.ts) — `null` when the user has no `roles`
+  // preference set, in which case no title condition is added at all
+  // (nothing to filter on, matches `titleMatchesRoles`'s own fallback).
+  const rolePattern = roleTitlePatternSource(prefs?.roles ?? []);
+
   const idRows = await db
     .select(CANDIDATE_ID_COLUMNS)
     .from(jobs)
@@ -129,6 +138,7 @@ async function selectCandidateJobs(
         eq(jobs.isEntryLevel, true),
         eq(jobs.isRelevantRole, true),
         isNull(jobScores.id),
+        ...(rolePattern ? [sql`${jobs.title} ~* ${rolePattern}`] : []),
         ...candidateConditions(prefs),
       ),
     )

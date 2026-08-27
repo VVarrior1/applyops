@@ -60,6 +60,28 @@ async function parseErrorBody(res: Response): Promise<string> {
   }
 }
 
+/** A row is "New" at 3 days old or younger — mirrors the Jobs page build spec's badge threshold. */
+const NEW_WITHIN_DAYS = 3;
+
+/**
+ * `job.postedAt` (ISO) → the "Posted" column's relative age ("Today",
+ * "3d ago", "27d ago"), its absolute date for the cell's `title` tooltip,
+ * and whether it's fresh enough for the "New" badge. `null` when the
+ * posting never carried a date (the SQL posted-date filter still lets such
+ * rows through via `scraped_at`, per the Jobs page build spec item 1 — this
+ * column just has nothing dated to show for them).
+ */
+function formatPostedAge(postedAtIso: string | null): { relative: string; absolute: string; isNew: boolean } | null {
+  if (!postedAtIso) return null;
+  const date = new Date(postedAtIso);
+  const days = Math.max(0, Math.floor((Date.now() - date.getTime()) / 86_400_000));
+  return {
+    relative: days === 0 ? "Today" : `${days}d ago`,
+    absolute: format(date, "MMM d, yyyy"),
+    isNew: days <= NEW_WITHIN_DAYS,
+  };
+}
+
 /**
  * `/jobs`'s ranked table plus the "Rank more" action (plan Task 8 Step 3).
  * Score is shown on whichever scale actually produced it — `fit-v1` (0–100)
@@ -71,11 +93,19 @@ export function JobList({
   jobs,
   skippedCount,
   verdictFilter,
+  total,
+  page,
+  pageSize,
 }: {
   jobs: JobListItem[];
   /** Count of skip-verdict rows in the fetched page, whether or not they're currently shown. */
   skippedCount: number;
   verdictFilter: "worth" | "all";
+  /** True COUNT(*) over the same SQL conditions as `jobs` — not the page size, see build spec item 2. */
+  total: number;
+  /** 1-indexed current page. */
+  page: number;
+  pageSize: number;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -93,6 +123,21 @@ export function JobList({
     const qs = params.toString();
     return qs ? `/jobs?${qs}` : "/jobs";
   })();
+
+  // Prev/next: same "preserve every other param" approach as
+  // toggleVerdictHref — page 1 (the default) has no `page` param at all.
+  function pageHref(targetPage: number): string {
+    const params = new URLSearchParams(searchParams.toString());
+    if (targetPage <= 1) params.delete("page");
+    else params.set("page", String(targetPage));
+    const qs = params.toString();
+    return qs ? `/jobs?${qs}` : "/jobs";
+  }
+
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+  const hasPrev = page > 1;
+  const hasNext = page * pageSize < total;
 
   async function handleRankMore() {
     setRanking(true);
@@ -124,11 +169,14 @@ export function JobList({
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          {jobs.length} job{jobs.length === 1 ? "" : "s"}
+          {total === 0 ? "Showing 0 of 0" : `Showing ${from}–${to} of ${total}`}
           {skippedCount > 0 && (
             <>
               {" "}
-              · {skippedCount} {verdictFilter === "worth" ? "hidden as skip" : "skipped (shown)"}{" "}
+              ·{" "}
+              {verdictFilter === "worth"
+                ? `${skippedCount} more hidden on this page`
+                : `${skippedCount} skipped (shown)`}{" "}
               <Link
                 href={toggleVerdictHref}
                 className="underline underline-offset-2 hover:text-foreground"
@@ -213,12 +261,47 @@ export function JobList({
                 )}
               </TableCell>
               <TableCell className="text-muted-foreground">
-                {job.postedAt ? format(new Date(job.postedAt), "MMM d") : "—"}
+                {(() => {
+                  const age = formatPostedAge(job.postedAt);
+                  if (!age) return "—";
+                  return (
+                    <span title={age.absolute} className="inline-flex items-center gap-1.5">
+                      {age.relative}
+                      {age.isNew && (
+                        <Badge className="border-emerald-500/20 bg-emerald-500/15 text-[10px] text-emerald-700 dark:text-emerald-400">
+                          New
+                        </Badge>
+                      )}
+                    </span>
+                  );
+                })()}
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
+
+      <div className="flex items-center justify-between gap-2">
+        <Link
+          href={pageHref(page - 1)}
+          aria-disabled={!hasPrev}
+          className={`text-sm underline-offset-2 hover:text-foreground ${
+            hasPrev ? "text-muted-foreground hover:underline" : "pointer-events-none text-muted-foreground/40"
+          }`}
+        >
+          ← Prev
+        </Link>
+        <span className="text-xs text-muted-foreground">Page {page}</span>
+        <Link
+          href={pageHref(page + 1)}
+          aria-disabled={!hasNext}
+          className={`text-sm underline-offset-2 hover:text-foreground ${
+            hasNext ? "text-muted-foreground hover:underline" : "pointer-events-none text-muted-foreground/40"
+          }`}
+        >
+          Next →
+        </Link>
+      </div>
     </div>
   );
 }

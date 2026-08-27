@@ -47,9 +47,9 @@ const PUBLIC_TARGETS: { path: string; file: string }[] = [
 ];
 
 const AUTH_TARGETS: { path: string; file: string; fullPage?: boolean }[] = [
-  // Not fullPage: /jobs lists ~200 rows (JOBS_PAGE_LIMIT) and a full-page
-  // capture of the whole list is not useful in a README — one viewport of
-  // the ranked list makes the point.
+  // Not fullPage: /jobs paginates at 50 rows/page and a full-page capture
+  // of the whole list is not useful in a README — one viewport of the
+  // ranked list makes the point.
   { path: "/jobs", file: "jobs.png", fullPage: false },
   { path: "/funnel", file: "funnel.png" },
   { path: "/applications", file: "applications.png" },

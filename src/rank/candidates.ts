@@ -16,8 +16,12 @@ import { jobs } from "../db/schema";
 import type { CountryCode } from "../finders/country";
 import type { SearchPrefsRow } from "../profile/facts";
 
-/** Postings older than this are excluded from ranking candidates (spec: item 3c). */
-export const CANDIDATE_STALE_AFTER_DAYS = 45;
+/**
+ * Postings older than this are excluded from ranking candidates (spec: item
+ * 3c). 30, not 45 — the owner explicitly wants no ranking budget spent
+ * scoring postings older than 30 days (Jobs page build notes, item 4).
+ */
+export const CANDIDATE_STALE_AFTER_DAYS = 30;
 
 /** Only the two prefs fields this module reads — callers can pass a full `SearchPrefsRow` or a partial fake in tests. */
 export type CandidatePrefs = Pick<SearchPrefsRow, "countries" | "workAuth"> | null;
@@ -39,7 +43,13 @@ export function countryUnknownCondition(): SQL {
   return sql`(${jobs.countries} is null or cardinality(${jobs.countries}) = 0)`;
 }
 
-function lacksUsAuth(workAuth: string | null | undefined): boolean {
+/**
+ * Whether a prefs `workAuth` value means "doesn't already have US work
+ * authorization" — exported so `/jobs`' verdict=worth SQL blockers can apply
+ * the exact same rule `candidateConditions` uses below, rather than a second
+ * hand-maintained copy.
+ */
+export function lacksUsAuth(workAuth: string | null | undefined): boolean {
   return workAuth === "canada" || workAuth === "needs_sponsorship" || workAuth == null;
 }
 

@@ -1,4 +1,4 @@
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, ilike, notInArray, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { requireUser } from "@/src/auth/require";
 import { getDb } from "@/src/db/client";
@@ -8,14 +8,18 @@ import { COUNTRY_OPTIONS } from "@/src/finders/country";
 import { DEFAULT_MODEL_BY_STEP } from "@/src/llm/defaults";
 import type { SearchPrefsRow } from "@/src/profile/facts";
 import { getPrefs } from "@/src/profile/facts";
-import { countryOverlapCondition, countryUnknownCondition } from "@/src/rank/candidates";
+import { countryOverlapCondition, countryUnknownCondition, lacksUsAuth } from "@/src/rank/candidates";
 import { fitRankerVersion, KEYWORD_RANKER_VERSION } from "@/src/rank/rank";
+import { roleTitlePatternSource } from "@/src/rank/role-titles";
 import { assessJob, type VerdictInput } from "@/src/rank/verdict";
-import { JobFilters, type JobFiltersValue } from "@/components/jobs/JobFilters";
+import { JobFilters, type JobFiltersValue, type PostedFilter, type RolesFilter } from "@/components/jobs/JobFilters";
 import { JobList, type JobListItem } from "@/components/jobs/JobList";
 
-/** Rows fetched per load. The live table has ~2k active+entry+relevant jobs total (Task 7's notes); this is a browsing cap, not a hard ceiling on ranking. */
-const JOBS_PAGE_LIMIT = 200;
+/** Rows per page (build spec item 2 — replaces the old flat `LIMIT 200` browsing cap now that a true COUNT + `page` param make an unbounded page unnecessary). */
+const PAGE_SIZE = 50;
+
+/** The finite `posted` windows — "any" means no posted-date condition at all. */
+const POSTED_WINDOWS = ["3", "7", "14", "30"] as const;
 
 type RemoteFilter = "any" | "remote" | "onsite";
 type VerdictPrefs = NonNullable<VerdictInput["prefs"]>;
@@ -52,6 +56,46 @@ function parseVerdict(value: string | undefined): "worth" | "all" {
   return value === "all" ? "all" : "worth";
 }
 
+/** Default 7 (build spec item 1) — anything not in {@link POSTED_WINDOWS} or "any" falls back to it. */
+function parsePosted(value: string | undefined): PostedFilter {
+  if (value === "any") return "any";
+  return (POSTED_WINDOWS as readonly string[]).includes(value ?? "") ? (value as PostedFilter) : "7";
+}
+
+/** "mine" is the default only when the user actually has a `roles` preference set — otherwise there'd be nothing to filter on, so it behaves like "any" regardless. */
+function parseRoles(value: string | undefined, userHasRoles: boolean): RolesFilter {
+  if (value === "any") return "any";
+  if (value === "mine") return "mine";
+  return userHasRoles ? "mine" : "any";
+}
+
+function parseQ(value: string | undefined): string {
+  return (value ?? "").trim();
+}
+
+function parsePage(value: string | undefined): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1;
+}
+
+/**
+ * `posted_at >= now() - interval '<days> days'`, falling back to
+ * `scraped_at` for postings whose board never published a date (build spec
+ * item 1: "rows with NULL posted_at are included only when posted=any,
+ * otherwise fall back to scraped_at within the same window"). `days` only
+ * ever comes from {@link POSTED_WINDOWS} — a fixed, checked enum, never raw
+ * user text — so splicing it into the interval literal via `sql.raw` is
+ * exactly as safe as `candidateConditions`' own `CANDIDATE_STALE_AFTER_DAYS`
+ * interval (src/rank/candidates.ts).
+ */
+function postedWindowCondition(days: (typeof POSTED_WINDOWS)[number]): SQL {
+  const interval = sql.raw(`interval '${days} days'`);
+  return sql`(
+    (${jobs.postedAt} is not null and ${jobs.postedAt} >= now() - ${interval})
+    or (${jobs.postedAt} is null and ${jobs.scrapedAt} >= now() - ${interval})
+  )`;
+}
+
 /** `search_prefs` (untyped `text` columns) → `assessJob`'s narrow prefs union. The API route (`app/api/profile/prefs/route.ts`) is what actually constrains these values on write. */
 function toVerdictPrefs(prefs: SearchPrefsRow | null): VerdictPrefs | null {
   if (!prefs) return null;
@@ -65,7 +109,9 @@ function toVerdictPrefs(prefs: SearchPrefsRow | null): VerdictPrefs | null {
 
 /**
  * `/jobs` — plan Task 8 Step 3: table sorted by fit score (fallback keyword
- * score), filters (min score, remote, work-auth, vendor, country, verdict).
+ * score), filters (min score, remote, work-auth, vendor, country, verdict),
+ * plus later additions: a posted-date window, a true COUNT + `page`-based
+ * pagination, a title/company search box, and a role-family filter.
  *
  * Restricted to `active ∧ is_entry_level ∧ is_relevant_role`, same as
  * `rankForUser`'s candidate pool (`src/rank/rank.ts`) — this page is "your
@@ -84,11 +130,21 @@ function toVerdictPrefs(prefs: SearchPrefsRow | null): VerdictPrefs | null {
  * computed server-side from the row's *raw* fit-v1 score (never the
  * coalesced display score — the two scales aren't comparable, see above),
  * `jobs.analysis`, the signed-in user's prefs, and whether they already
- * have an application against that job. `verdict=worth` (the default) then
- * drops skip-verdict rows from what's rendered — after computing verdicts
- * for the whole fetched page, not via a SQL filter, since several of
- * `assessJob`'s hard blockers (title regex, `analysis.years_min`, fit score)
- * aren't cheaply expressible as SQL.
+ * have an application against that job.
+ *
+ * `verdict=worth` (the default) drops skip-verdict rows from what's
+ * rendered — and, so a COUNT(*) and the rendered page actually agree, the
+ * cheap subset of `assessJob`'s hard blockers that ARE expressible as SQL
+ * (real country overlap, real work-auth mismatch, already-applied) are also
+ * pushed into the WHERE clause when verdict=worth, using the user's actual
+ * `search_prefs` — independent of whatever the "country"/"workAuth" URL
+ * filters below happen to be set to, exactly mirroring how `assessJob`
+ * itself always evaluates against the real prefs, not the URL filters.
+ * `assessJob` still runs per fetched row for the caveats that aren't cheaply
+ * SQL-expressible (title regex, `analysis.years_min`, fit score, staleness
+ * past 45 days, onsite-location mismatch) — any of ITS skip verdicts that
+ * slip through the SQL conditions are still hidden client-side, surfaced as
+ * "N more hidden on this page" rather than silently shrinking the count.
  */
 export default async function JobsPage({
   searchParams,
@@ -100,17 +156,27 @@ export default async function JobsPage({
     vendor?: string;
     country?: string;
     verdict?: string;
+    posted?: string;
+    q?: string;
+    roles?: string;
+    page?: string;
   }>;
 }) {
   const user = await requireUser();
   const sp = await searchParams;
   const db = getDb();
 
-  const prefs = await getPrefs(db, user.id);
+  const [prefs, appliedRows] = await Promise.all([
+    getPrefs(db, user.id),
+    db.select({ jobId: applications.jobId }).from(applications).where(eq(applications.userId, user.id)),
+  ]);
+  const appliedJobIds = new Set(appliedRows.map((r) => r.jobId));
+
   const userCountryCodes = prefs?.countries ?? [];
   const userCountryOptions = userCountryCodes
     .map((code) => COUNTRY_OPTIONS.find((o) => o.code === code))
     .filter((o): o is { code: string; name: string } => Boolean(o));
+  const userRoles = prefs?.roles ?? [];
 
   const filters: JobFiltersValue = {
     minScore: parseMinScore(sp.minScore),
@@ -119,13 +185,17 @@ export default async function JobsPage({
     vendor: parseVendor(sp.vendor),
     country: parseCountry(sp.country, userCountryCodes),
     verdict: parseVerdict(sp.verdict),
+    posted: parsePosted(sp.posted),
+    q: parseQ(sp.q),
+    roles: parseRoles(sp.roles, userRoles.length > 0),
   };
+  const page = parsePage(sp.page);
 
   const fitVersion = fitRankerVersion(DEFAULT_MODEL_BY_STEP.fit);
   const fitScores = alias(jobScores, "fit_scores");
   const kwScores = alias(jobScores, "kw_scores");
 
-  const conditions = [
+  const conditions: SQL[] = [
     eq(jobs.active, true),
     eq(jobs.isEntryLevel, true),
     eq(jobs.isRelevantRole, true),
@@ -154,8 +224,42 @@ export default async function JobsPage({
     // rejects anything else back to "my").
     conditions.push(countryOverlapCondition([filters.country]));
   }
+  if (filters.posted !== "any") {
+    conditions.push(postedWindowCondition(filters.posted));
+  }
+  if (filters.q) {
+    const needle = `%${filters.q}%`;
+    conditions.push(sql`(${ilike(jobs.title, needle)} or ${ilike(companies.name, needle)})`);
+  }
+  if (filters.roles === "mine") {
+    const rolePattern = roleTitlePatternSource(userRoles);
+    if (rolePattern) conditions.push(sql`${jobs.title} ~* ${rolePattern}`);
+  }
+  if (filters.verdict === "worth") {
+    // The SQL-expressible subset of assessJob's hard blockers, driven by
+    // the user's *real* prefs (never the URL filters above) — see the file
+    // header.
+    if (userCountryCodes.length > 0) conditions.push(countryOverlapCondition(userCountryCodes));
+    if (lacksUsAuth(prefs?.workAuth)) {
+      conditions.push(sql`(${jobs.workAuthSignal} is null or ${jobs.workAuthSignal} <> 'needs_us_auth')`);
+    }
+    conditions.push(notInArray(jobs.id, [...appliedJobIds]));
+  }
 
-  const [rows, appliedRows] = await Promise.all([
+  const [countRows, rows] = await Promise.all([
+    db
+      .select({ total: sql<number>`count(*)` })
+      .from(jobs)
+      .leftJoin(companies, eq(jobs.companyId, companies.id))
+      .leftJoin(
+        fitScores,
+        and(
+          eq(fitScores.jobId, jobs.id),
+          eq(fitScores.userId, user.id),
+          eq(fitScores.rankerVersion, fitVersion),
+        ),
+      )
+      .where(and(...conditions)),
     db
       .select({
         id: jobs.id,
@@ -201,11 +305,11 @@ export default async function JobsPage({
         sql`coalesce(${fitScores.score}, ${kwScores.score}) DESC NULLS LAST`,
         sql`${jobs.postedAt} DESC NULLS LAST`,
       )
-      .limit(JOBS_PAGE_LIMIT),
-    db.select({ jobId: applications.jobId }).from(applications).where(eq(applications.userId, user.id)),
+      .limit(PAGE_SIZE)
+      .offset((page - 1) * PAGE_SIZE),
   ]);
 
-  const appliedJobIds = new Set(appliedRows.map((r) => r.jobId));
+  const total = Number(countRows[0]?.total ?? 0);
   const verdictPrefs = toVerdictPrefs(prefs);
 
   const allItems: JobListItem[] = rows.map((row) => {
@@ -256,8 +360,15 @@ export default async function JobsPage({
         </p>
       </div>
 
-      <JobFilters value={filters} userCountries={userCountryOptions} />
-      <JobList jobs={items} skippedCount={skippedCount} verdictFilter={filters.verdict} />
+      <JobFilters value={filters} userCountries={userCountryOptions} userRoles={userRoles} />
+      <JobList
+        jobs={items}
+        skippedCount={skippedCount}
+        verdictFilter={filters.verdict}
+        total={total}
+        page={page}
+        pageSize={PAGE_SIZE}
+      />
     </div>
   );
 }
