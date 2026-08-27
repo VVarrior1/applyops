@@ -16,8 +16,13 @@ import { loadPublicResults } from "@/src/funnel/public-results";
 export const revalidate = 300;
 
 export async function GET() {
-  const db = getDb();
-  const data = await loadPublicResults(db);
+  // `DATABASE_URL` is absent during CI's env-stripped `npm run build` (see
+  // .github/workflows/ci.yml) and this route is statically prerendered (ISR,
+  // `revalidate` above) — `getDb()` throws synchronously without a URL, which
+  // would fail the whole build. Skip the query when there's no database to
+  // reach; `data: null` is already a valid response shape (see the comment
+  // below), and the 300s revalidate refills it once deployed with real env vars.
+  const data = process.env.DATABASE_URL ? await loadPublicResults(getDb()) : null;
 
   // 200 either way: `data: null` ("no owner has signed in yet") is a valid,
   // expected state for a fresh deploy, not an error a client should retry.

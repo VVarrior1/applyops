@@ -197,8 +197,14 @@ function stageLabel(stage: string): string {
 }
 
 export default async function PublicResultsPage() {
-  const db = getDb();
-  const data = await loadPublicResults(db);
+  // `DATABASE_URL` is absent during CI's env-stripped `npm run build` (see
+  // .github/workflows/ci.yml) and this route is statically prerendered (ISR,
+  // `revalidate` above) — `getDb()` throws synchronously without a URL, which
+  // would fail the whole build. Skip the query when there's no database to
+  // reach; the page already renders a correct "No results yet" empty state
+  // for `data === null`, and the 300s revalidate refills it from the first
+  // real request once deployed with real env vars.
+  const data = process.env.DATABASE_URL ? await loadPublicResults(getDb()) : null;
 
   return (
     <div className="flex flex-1 flex-col">

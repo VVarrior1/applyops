@@ -53,8 +53,19 @@ import { redactCompanies, roleFamily } from "./redact";
 /** Same step `/evals` (Task 11) fixes its trend chart to — see file header. */
 const FLAGSHIP_STEP = "tailor" as const;
 
-/** Spec §7's gate threshold, mirrored for display — see file header. */
+/**
+ * Spec §7's gate thresholds, pinned to match Task 12's
+ * `DEFAULT_GATE_THRESHOLDS` (`src/eval/gate.ts`) exactly — as of this branch
+ * that module lives on `origin/task/12`, not yet merged here, so it can't be
+ * imported directly. `tests/funnel/public-results.test.ts` pins these three
+ * numbers so a value drift between the two modules fails a test instead of
+ * shipping a public badge that disagrees with the real CI gate. Once Task 12
+ * merges, replace `computeGateStatus` with a call to `evaluateGate` from
+ * `src/eval/gate.ts` and delete these constants.
+ */
 const GATE_MAX_HALLUCINATION_RATE = 0.02;
+const GATE_MAX_FAILED_ITEM_RATE = 0.1;
+const GATE_MIN_SCORED_ITEMS = 1;
 
 /** How many recent applications to show, redacted, on the public page. */
 const RECENT_APPLICATIONS_LIMIT = 15;
@@ -117,13 +128,18 @@ export interface PublicResults {
 
 /**
  * The same pass/fail rule spec §7 / Task 12's `evaluateGate` describes
- * (`hallucinationRate > 0.02`, or a vs-baseline CI entirely below zero),
- * plus one extra check this module's context flagged as important: a run
- * where every item errored reports 0% hallucination by construction (no
- * claims were ever checked) and must not read as "passed" — see Task 11's
- * completed-task notes on `failed_items`.
+ * (`hallucinationRate > 0.02`, or a vs-baseline CI entirely below zero, or a
+ * *fraction* — not any nonzero count — of attempted items failing to run:
+ * see `GATE_MAX_FAILED_ITEM_RATE`'s doc comment for why a fraction), plus one
+ * extra check this module's context flagged as important: a run where every
+ * item errored reports 0% hallucination by construction (no claims were ever
+ * checked) and must not read as "passed" — see Task 11's completed-task
+ * notes on `failed_items`, and `GATE_MIN_SCORED_ITEMS` below.
+ *
+ * Exported (pure, no I/O) so `tests/funnel/public-results.test.ts` can pin
+ * it against Task 12's real threshold values without a DB handle.
  */
-function computeGateStatus(run: EvalRunListItem): { status: "pass" | "fail"; reasons: string[] } {
+export function computeGateStatus(run: EvalRunListItem): { status: "pass" | "fail"; reasons: string[] } {
   const reasons: string[] = [];
   const hallucinationRate = run.hallucinationRate ?? 0;
 
@@ -142,9 +158,22 @@ function computeGateStatus(run: EvalRunListItem): { status: "pass" | "fail"; rea
     );
   }
 
+  // A fraction, not `failedItems > 0` — see file header / GATE_MAX_FAILED_ITEM_RATE.
   const failedItems = run.failedItems ?? 0;
-  if (failedItems > 0) {
-    reasons.push(`${failedItems} of ${run.itemsAttempted ?? "?"} items failed to run`);
+  const itemsAttempted = run.itemsAttempted ?? failedItems;
+  const failedItemRate = itemsAttempted > 0 ? failedItems / itemsAttempted : 0;
+  if (failedItemRate > GATE_MAX_FAILED_ITEM_RATE) {
+    reasons.push(
+      `${failedItems} of ${run.itemsAttempted ?? "?"} items failed to run (${(failedItemRate * 100).toFixed(
+        0,
+      )}% > ${(GATE_MAX_FAILED_ITEM_RATE * 100).toFixed(0)}% threshold)`,
+    );
+  }
+
+  // A run that scored nothing proves nothing — must not read as "passed".
+  const scoredItems = run.itemCount ?? 0;
+  if (scoredItems < GATE_MIN_SCORED_ITEMS) {
+    reasons.push(`only ${scoredItems} scored item(s), below the minimum of ${GATE_MIN_SCORED_ITEMS}`);
   }
 
   return { status: reasons.length === 0 ? "pass" : "fail", reasons };
@@ -280,8 +309,16 @@ export async function loadPublicResults(db: Db): Promise<PublicResults | null> {
       }
     : null;
 
+  // Prefer the latest *baseline* run of the default model — "where the
+  // shipping model stands" should read the number spec §7's gate compares
+  // everything else against, not whatever non-baseline run happened most
+  // recently (which can be a deliberate regression/candidate run and
+  // simultaneously fail the gate card above it). Fall back to the latest run
+  // only when no baseline exists yet for that model.
   const defaultModelId = defaultModelForStep(FLAGSHIP_STEP);
-  const latestDefaultModelRun = flagshipRuns.find((run) => run.modelId === defaultModelId);
+  const latestDefaultModelRun =
+    flagshipRuns.find((run) => run.modelId === defaultModelId && run.baseline) ??
+    flagshipRuns.find((run) => run.modelId === defaultModelId);
   const benchmarkHeadline: BenchmarkHeadline | null = latestDefaultModelRun
     ? {
         step: FLAGSHIP_STEP,
