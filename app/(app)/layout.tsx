@@ -6,6 +6,7 @@ import { profiles } from "@/src/db/schema";
 import { SignOutButton } from "./sign-out-button";
 
 const NAV_ITEMS = [
+  { href: "/onboarding", label: "Onboarding" },
   { href: "/jobs", label: "Jobs" },
   { href: "/applications", label: "Applications" },
   { href: "/funnel", label: "Funnel" },

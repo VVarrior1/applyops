@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { requireUser } from "@/src/auth/require";
 import { getDb } from "@/src/db/client";
 import { profiles } from "@/src/db/schema";
+import { getPrefs, listFactRecords } from "@/src/profile/facts";
 import {
   Card,
   CardHeader,
@@ -12,28 +13,35 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PrefsForm } from "../onboarding/prefs-form";
+import { FactsEditor } from "./facts-editor";
+import { BudgetEditor } from "./budget-editor";
+import { DeleteMyData } from "./delete-my-data";
 
 /**
- * Account overview. Task 6 extends this page with the facts editor, search
- * prefs, budget editing, and "Delete my data" — this task only needs the
- * account identity + (for the owner) a link into the allow-list admin page.
+ * Account overview, resume/facts editor, search prefs, budget (owner-only
+ * edit), and "Delete my data" — plan Task 6 Step 4.
  */
 export default async function SettingsPage() {
   const user = await requireUser();
   const db = getDb();
 
-  const [profile] = await db
-    .select({ isOwner: profiles.isOwner, dailyBudgetUsd: profiles.dailyBudgetUsd })
-    .from(profiles)
-    .where(eq(profiles.userId, user.id))
-    .limit(1);
+  const [[profile], facts, prefs] = await Promise.all([
+    db
+      .select({ isOwner: profiles.isOwner, dailyBudgetUsd: profiles.dailyBudgetUsd })
+      .from(profiles)
+      .where(eq(profiles.userId, user.id))
+      .limit(1),
+    listFactRecords(db, user.id),
+    getPrefs(db, user.id),
+  ]);
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
       <div>
         <h1 className="text-xl font-semibold">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Your account, budget, and preferences.
+          Your account, resume facts, preferences, and budget.
         </p>
       </div>
 
@@ -44,9 +52,13 @@ export default async function SettingsPage() {
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3 text-sm">
           {profile?.isOwner && <Badge>Owner</Badge>}
-          <span className="text-muted-foreground">
-            Daily budget: ${profile?.dailyBudgetUsd ?? "1.00"}
-          </span>
+          {profile?.isOwner ? (
+            <BudgetEditor initialDailyBudgetUsd={profile.dailyBudgetUsd} />
+          ) : (
+            <span className="text-muted-foreground">
+              Daily budget: ${profile?.dailyBudgetUsd ?? "1.00"}
+            </span>
+          )}
         </CardContent>
       </Card>
 
@@ -69,6 +81,41 @@ export default async function SettingsPage() {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Resume facts</CardTitle>
+          <CardDescription>
+            The only claims a generated resume may cite.{" "}
+            <Link href="/onboarding">Upload a resume</Link> to add more.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FactsEditor initialFacts={facts} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Job search preferences</CardTitle>
+          <CardDescription>Used to rank and filter matches.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PrefsForm initialPrefs={prefs} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Danger zone</CardTitle>
+          <CardDescription>
+            Permanently delete your facts, preferences, applications, and resumes.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DeleteMyData />
+        </CardContent>
+      </Card>
     </div>
   );
 }
