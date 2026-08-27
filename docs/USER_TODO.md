@@ -90,3 +90,14 @@ allow-list check.
 - **Custom domain (optional):** if you want something other than the default
   `*.vercel.app` URL, add it under the Vercel project's Settings → Domains,
   then update the Supabase redirect URL above to match.
+
+## 6. (Optional) Ask GitHub to purge a cached commit
+
+Early README screenshots were committed with the owner email unmasked, then
+rewritten out of history the same day (the commit no longer exists in the
+repo, and all task branches were deleted). GitHub can still serve the old
+commit by URL / in the merged PR #2 view until its garbage collection runs.
+If you want it gone sooner, open a support request at
+https://support.github.com/request and ask them to purge unreachable
+objects for `VVarrior1/applyops`. The screenshots showed an email address,
+not a secret, so this is tidiness rather than urgency.
