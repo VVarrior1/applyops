@@ -1,4 +1,5 @@
 import type { Command } from "commander";
+import { register as registerApply } from "./apply";
 
 /**
  * Each CLI command lives in its own file and exports `register(program)`.
@@ -6,5 +7,6 @@ import type { Command } from "commander";
  * conflicts between parallel tasks.
  */
 export const registrars: Array<(program: Command) => void> = [
+  registerApply,
   // (tasks append here, e.g.)  registerScrape,
 ];
