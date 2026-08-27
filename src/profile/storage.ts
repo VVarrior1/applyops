@@ -78,19 +78,48 @@ export async function uploadResumePdf(userId: string, bytes: Buffer): Promise<st
 }
 
 /**
- * Removes every resume object a user has ever uploaded — the storage half of
- * `deleteUserData` (`src/profile/facts.ts`). Treats "bucket doesn't exist"
- * and "user has no folder" both as "nothing to delete", not errors: a user
- * who deletes their data without ever uploading a resume should not see
- * this fail.
+ * Page size for {@link deleteAllResumeObjects}'s `list()` calls. Exported so
+ * a test can build exactly this many fake objects to exercise the
+ * "keep paginating" branch without hand-picking a number that happens to
+ * match a hardcoded literal.
  */
-export async function deleteAllResumeObjects(userId: string): Promise<void> {
-  const client = getStorageAdminClient();
+export const RESUME_LIST_PAGE_SIZE = 1000;
 
-  const { data, error } = await client.storage.from(RESUME_BUCKET).list(userId);
-  if (error || !data || data.length === 0) return;
+/**
+ * Removes every resume object a user has ever uploaded — the storage half of
+ * `deleteUserData` (`src/profile/facts.ts`).
+ *
+ * Paginates with `{limit, offset}` rather than relying on `list()`'s default
+ * `limit: 100` (a user past 100 uploads would otherwise keep every object
+ * beyond the first page forever, since nothing else prunes old uploads).
+ *
+ * A genuine failure (bad service key, network, permissions) is rethrown
+ * rather than swallowed: verified live against this project's own `resumes`
+ * bucket that Supabase Storage's `list()` returns `{data: [], error: null}`
+ * — not an error — for both a prefix with no objects AND a bucket that
+ * doesn't exist at all, so any non-null `error` here is a real failure, not
+ * a "nothing to delete" case, and letting it through silently (the previous
+ * behavior) could leave a user's resume PDFs in Storage after "Delete my
+ * data" reports success.
+ */
+export async function deleteAllResumeObjects(
+  userId: string,
+  client: SupabaseClient = getStorageAdminClient(),
+): Promise<void> {
+  let offset = 0;
 
-  const paths = data.map((f) => `${userId}/${f.name}`);
-  const { error: removeError } = await client.storage.from(RESUME_BUCKET).remove(paths);
-  if (removeError) throw removeError;
+  for (;;) {
+    const { data, error } = await client.storage
+      .from(RESUME_BUCKET)
+      .list(userId, { limit: RESUME_LIST_PAGE_SIZE, offset });
+    if (error) throw error;
+    if (!data || data.length === 0) return;
+
+    const paths = data.map((f) => `${userId}/${f.name}`);
+    const { error: removeError } = await client.storage.from(RESUME_BUCKET).remove(paths);
+    if (removeError) throw removeError;
+
+    if (data.length < RESUME_LIST_PAGE_SIZE) return;
+    offset += RESUME_LIST_PAGE_SIZE;
+  }
 }

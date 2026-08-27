@@ -94,6 +94,77 @@ export interface ProfileFactRecord {
   confirmed: boolean;
 }
 
+const FACT_RETURNING = {
+  label: profileFacts.label,
+  category: profileFacts.category,
+  text: profileFacts.text,
+  source: profileFacts.source,
+  confirmed: profileFacts.confirmed,
+} as const;
+
+/** Upserts an explicitly-labeled fact (an edit) onto that exact row. */
+async function upsertLabeledFact(
+  db: Db,
+  userId: string,
+  fact: UpsertFactInput & { label: string },
+): Promise<ProfileFactRecord> {
+  const values = {
+    userId,
+    label: fact.label,
+    category: fact.category,
+    text: fact.text,
+    source: fact.source ?? "manual",
+    confirmed: true,
+    updatedAt: new Date(),
+  };
+  const [row] = await db
+    .insert(profileFacts)
+    .values(values)
+    .onConflictDoUpdate({
+      target: [profileFacts.userId, profileFacts.label],
+      set: {
+        category: values.category,
+        text: values.text,
+        source: values.source,
+        confirmed: values.confirmed,
+        updatedAt: values.updatedAt,
+      },
+    })
+    .returning(FACT_RETURNING);
+  return row;
+}
+
+/**
+ * Inserts a brand-new fact at a specific label, but only if that label is
+ * still free. `onConflictDoNothing` (never `onConflictDoUpdate`) is the
+ * whole point: if another request already took this label, this insert is a
+ * no-op — it returns `undefined` — rather than silently overwriting that
+ * other request's freshly-created fact. The caller ({@link upsertFacts})
+ * detects that and retries with a re-read label.
+ */
+async function insertNewFactAtLabel(
+  db: Db,
+  userId: string,
+  fact: UpsertFactInput,
+  label: string,
+): Promise<ProfileFactRecord | undefined> {
+  const values = {
+    userId,
+    label,
+    category: fact.category,
+    text: fact.text,
+    source: fact.source ?? "manual",
+    confirmed: true,
+    updatedAt: new Date(),
+  };
+  const [row] = await db
+    .insert(profileFacts)
+    .values(values)
+    .onConflictDoNothing({ target: [profileFacts.userId, profileFacts.label] })
+    .returning(FACT_RETURNING);
+  return row;
+}
+
 /**
  * Saves a batch of facts for one user. Entries that already carry a `label`
  * are upserted onto that exact row (edits from the settings facts editor);
@@ -104,8 +175,14 @@ export interface ProfileFactRecord {
  * already been reviewed by the user (see plan Task 6 Step 3: "POST
  * /api/profile/facts saves with confirmed=true").
  *
- * New labels are computed once up front from a single `SELECT`, so a batch
- * of N new facts costs one read, not N.
+ * New labels are computed once up front from a single `SELECT` (so the
+ * common case — no concurrent writer — costs one read for a batch of N new
+ * facts, not N), but a label collision (two concurrent unlabelled batches
+ * for the same user racing to claim the same next label) is not treated as
+ * "whoever writes second wins": `insertNewFactAtLabel` uses
+ * `onConflictDoNothing`, so a collision is detected (the insert returns no
+ * row) and retried against a freshly re-read max instead of silently
+ * overwriting the other batch's fact.
  */
 export async function upsertFacts(
   db: Db,
@@ -118,46 +195,37 @@ export async function upsertFacts(
     .select({ label: profileFacts.label })
     .from(profileFacts)
     .where(eq(profileFacts.userId, userId));
-  const existingMax = maxFactLabelNumber(existing.map((r) => r.label));
+  let nextLabelNumber = maxFactLabelNumber(existing.map((r) => r.label)) + 1;
 
-  let nextOffset = 0;
-  const toSave = facts.map((fact) => {
-    if (fact.label) return fact as UpsertFactInput & { label: string };
-    nextOffset += 1;
-    return { ...fact, label: formatFactLabel(existingMax + nextOffset) };
-  });
-
+  const MAX_LABEL_ATTEMPTS = 5;
   const saved: ProfileFactRecord[] = [];
-  for (const fact of toSave) {
-    const values = {
-      userId,
-      label: fact.label,
-      category: fact.category,
-      text: fact.text,
-      source: fact.source ?? "manual",
-      confirmed: true,
-      updatedAt: new Date(),
-    };
-    const [row] = await db
-      .insert(profileFacts)
-      .values(values)
-      .onConflictDoUpdate({
-        target: [profileFacts.userId, profileFacts.label],
-        set: {
-          category: values.category,
-          text: values.text,
-          source: values.source,
-          confirmed: values.confirmed,
-          updatedAt: values.updatedAt,
-        },
-      })
-      .returning({
-        label: profileFacts.label,
-        category: profileFacts.category,
-        text: profileFacts.text,
-        source: profileFacts.source,
-        confirmed: profileFacts.confirmed,
-      });
+  for (const fact of facts) {
+    if (fact.label) {
+      saved.push(await upsertLabeledFact(db, userId, fact as UpsertFactInput & { label: string }));
+      continue;
+    }
+
+    let row: ProfileFactRecord | undefined;
+    for (let attempt = 0; !row && attempt < MAX_LABEL_ATTEMPTS; attempt++) {
+      const label = formatFactLabel(nextLabelNumber);
+      row = await insertNewFactAtLabel(db, userId, fact, label);
+      if (row) {
+        nextLabelNumber += 1;
+      } else {
+        // Someone else claimed this label between our SELECT and our
+        // INSERT — re-read the true max and try the next one.
+        const fresh = await db
+          .select({ label: profileFacts.label })
+          .from(profileFacts)
+          .where(eq(profileFacts.userId, userId));
+        nextLabelNumber = maxFactLabelNumber(fresh.map((r) => r.label)) + 1;
+      }
+    }
+    if (!row) {
+      throw new Error(
+        `Could not assign a label for a new fact for user ${userId} after ${MAX_LABEL_ATTEMPTS} attempts (persistent concurrent writes).`,
+      );
+    }
     saved.push(row);
   }
 
@@ -278,14 +346,28 @@ export interface DeleteUserDataOptions {
 }
 
 /**
- * Permanently deletes everything this app knows about one user: every row
- * in every table that carries their `user_id`, plus their resume objects in
- * Storage. Used by the Settings "Delete my data" flow (plan Task 6 Step 4:
- * "confirm dialog → deleteUserData → sign out" — the sign-out itself is the
- * caller's job, client-side, after this resolves).
+ * Permanently deletes everything this app knows about one user: their
+ * resume objects in Storage, then every row in every table that carries
+ * their `user_id`. Used by the Settings "Delete my data" flow (plan Task 6
+ * Step 4: "confirm dialog → deleteUserData → sign out" — the sign-out
+ * itself is the caller's job, client-side, after this resolves).
  *
- * Deletes in dependency order (children before parents) so nothing here
- * trips a foreign-key violation:
+ * Storage cleanup runs FIRST, outside the database transaction below, and
+ * its failure is allowed to propagate (not swallowed): if it throws — bad
+ * service key, network, permissions — this function aborts before a single
+ * database row is touched, so the account (and the "Delete my data" button)
+ * stays fully usable for a retry instead of ending up half-deleted with
+ * orphaned resume PDFs and no record anywhere that anything went wrong. The
+ * route (`app/api/profile/delete/route.ts`) catches this and surfaces a
+ * "try again" error instead of the unconditional `{ok:true}` it used to
+ * return even on a swallowed storage failure.
+ *
+ * Everything after that runs inside one database transaction — either the
+ * whole account disappears or none of it does, which matters because a
+ * mid-sequence failure (e.g. `eval_results.generation_id` becoming a live
+ * FK once Task 11 exists) would otherwise leave a half-deleted account with
+ * no way to tell from the outside. Deletes in dependency order (children
+ * before parents) so nothing here trips a foreign-key violation:
  *   1. `approvals` / `outcome_events` for this user's applications
  *   2. `applications`
  *   3. `job_scores`, `usage_daily`
@@ -313,44 +395,41 @@ export async function deleteUserData(
   userId: string,
   options: DeleteUserDataOptions = {},
 ): Promise<void> {
-  const apps = await db
-    .select({ id: applications.id })
-    .from(applications)
-    .where(eq(applications.userId, userId));
-  const applicationIds = apps.map((a) => a.id);
-
-  if (applicationIds.length > 0) {
-    await db.delete(approvals).where(inArray(approvals.applicationId, applicationIds));
-    await db.delete(outcomeEvents).where(inArray(outcomeEvents.applicationId, applicationIds));
-    await db.delete(applications).where(eq(applications.userId, userId));
-  }
-
-  await db.delete(jobScores).where(eq(jobScores.userId, userId));
-  await db.delete(usageDaily).where(eq(usageDaily.userId, userId));
-
-  const gens = await db
-    .select({ id: generations.id })
-    .from(generations)
-    .where(eq(generations.userId, userId));
-  const generationIds = gens.map((g) => g.id);
-
-  if (generationIds.length > 0) {
-    await db
-      .update(jobs)
-      .set({ analysisGenerationId: null })
-      .where(inArray(jobs.analysisGenerationId, generationIds));
-  }
-  await db.delete(generations).where(eq(generations.userId, userId));
-
-  await db.delete(profileFacts).where(eq(profileFacts.userId, userId));
-  await db.delete(searchPrefs).where(eq(searchPrefs.userId, userId));
-  await db.delete(profiles).where(eq(profiles.userId, userId));
-
   const deleteResumeObjects = options._internal?.deleteResumeObjects ?? deleteAllResumeObjects;
-  await deleteResumeObjects(userId).catch((err) => {
-    console.error(
-      `[deleteUserData] resume storage cleanup failed for user ${userId}:`,
-      err instanceof Error ? err.message : err,
-    );
+  await deleteResumeObjects(userId);
+
+  await db.transaction(async (tx) => {
+    const apps = await tx
+      .select({ id: applications.id })
+      .from(applications)
+      .where(eq(applications.userId, userId));
+    const applicationIds = apps.map((a) => a.id);
+
+    if (applicationIds.length > 0) {
+      await tx.delete(approvals).where(inArray(approvals.applicationId, applicationIds));
+      await tx.delete(outcomeEvents).where(inArray(outcomeEvents.applicationId, applicationIds));
+      await tx.delete(applications).where(eq(applications.userId, userId));
+    }
+
+    await tx.delete(jobScores).where(eq(jobScores.userId, userId));
+    await tx.delete(usageDaily).where(eq(usageDaily.userId, userId));
+
+    const gens = await tx
+      .select({ id: generations.id })
+      .from(generations)
+      .where(eq(generations.userId, userId));
+    const generationIds = gens.map((g) => g.id);
+
+    if (generationIds.length > 0) {
+      await tx
+        .update(jobs)
+        .set({ analysisGenerationId: null })
+        .where(inArray(jobs.analysisGenerationId, generationIds));
+    }
+    await tx.delete(generations).where(eq(generations.userId, userId));
+
+    await tx.delete(profileFacts).where(eq(profileFacts.userId, userId));
+    await tx.delete(searchPrefs).where(eq(searchPrefs.userId, userId));
+    await tx.delete(profiles).where(eq(profiles.userId, userId));
   });
 }

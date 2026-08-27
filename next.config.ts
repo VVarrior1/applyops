@@ -18,6 +18,24 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/**/*": ["./src/pipeline/prompts/**/*"],
   },
+
+  // REQUIRED for src/profile/resume-text.ts (Task 6 upload route). `pdf-parse`
+  // pulls in `pdfjs-dist/legacy/build/pdf.mjs`, which resolves its worker
+  // (`pdf.worker.mjs`) relative to wherever ITS OWN module ends up at
+  // runtime. Bundled into a Turbopack/webpack chunk, that resolution breaks
+  // — Next never emits `pdf.worker.mjs` into `.next/**/chunks/` — and every
+  // `extractPdfText` call throws "Cannot find module
+  // '.../pdf.worker.mjs'", which the upload route maps to a 422 that is
+  // indistinguishable from a genuinely bad PDF. `npm run build` stays green
+  // throughout because this is a runtime failure, not a compile error.
+  // Listing the package here makes Next `require()` it straight from
+  // node_modules at request time instead of bundling it, so Node's normal
+  // module resolution finds the real worker file. Verified against both
+  // `next build && next start` and `next dev` (see tests/config/next-config
+  // .test.ts for the regression guard, since a plain unit test of
+  // extractPdfText runs under vitest's own Node resolution and would never
+  // reproduce this bundler-specific failure).
+  serverExternalPackages: ["pdf-parse"],
 };
 
 export default nextConfig;

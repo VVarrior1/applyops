@@ -6,14 +6,20 @@ import { deleteFact, getConfirmedFacts, upsertFacts } from "@/src/profile/facts"
 import { FACT_CATEGORIES } from "@/src/pipeline/schemas";
 
 const factInputSchema = z.object({
-  label: z.string().trim().min(1).optional(),
+  // Must match the exact `F-###` shape `formatFactLabel`/`maxFactLabelNumber`
+  // produce and every pipeline prompt cites — an arbitrary string here (e.g.
+  // "hello") would insert a row `maxFactLabelNumber` silently ignores when
+  // numbering later facts, breaking the citation contract with no error.
+  label: z.string().trim().regex(/^F-\d{3,}$/).optional(),
   category: z.enum(FACT_CATEGORIES),
   text: z.string().trim().min(1).max(2000),
   source: z.enum(["resume_upload", "manual"]).optional(),
 });
 
 const postBodySchema = z.union([
-  z.object({ facts: z.array(factInputSchema).min(1) }),
+  // `upsertFacts` inserts row-by-row, so this bounds one request to a
+  // reasonable number of round trips rather than an unbounded batch.
+  z.object({ facts: z.array(factInputSchema).min(1).max(200) }),
   factInputSchema,
 ]);
 

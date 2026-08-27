@@ -66,10 +66,14 @@ describe("labelFacts", () => {
 function fakeFactsDb(seed: { existingLabels?: string[] } = {}) {
   const upserted: Record<string, unknown>[] = [];
   const deletedLabels: string[] = [];
+  // Tracks every label that has ever been successfully written, so
+  // `onConflictDoNothing` can simulate a real unique-index collision (used
+  // by the "does not overwrite on a label collision" test below).
+  const labels = new Set(seed.existingLabels ?? []);
 
   const db = {
     select() {
-      const rows = (seed.existingLabels ?? []).map((label) => ({ label }));
+      const rows = [...labels].map((label) => ({ label }));
       const q = {
         from: () => q,
         where: () => q,
@@ -86,6 +90,7 @@ function fakeFactsDb(seed: { existingLabels?: string[] } = {}) {
             onConflictDoUpdate(opts: { set: Record<string, unknown> }) {
               const merged = { ...values, ...opts.set };
               upserted.push(merged);
+              labels.add(merged.label as string);
               return {
                 returning: async () => [
                   {
@@ -96,6 +101,28 @@ function fakeFactsDb(seed: { existingLabels?: string[] } = {}) {
                     confirmed: merged.confirmed,
                   },
                 ],
+              };
+            },
+            onConflictDoNothing() {
+              return {
+                returning: async () => {
+                  // A real unique-index conflict: the label was already
+                  // taken (by a "concurrent" writer in the test, or by an
+                  // earlier call in this same batch) — insert is a no-op,
+                  // matching real Postgres `ON CONFLICT DO NOTHING`.
+                  if (labels.has(values.label as string)) return [];
+                  labels.add(values.label as string);
+                  upserted.push(values);
+                  return [
+                    {
+                      label: values.label,
+                      category: values.category,
+                      text: values.text,
+                      source: values.source,
+                      confirmed: values.confirmed,
+                    },
+                  ];
+                },
               };
             },
           };
@@ -158,6 +185,32 @@ describe("upsertFacts", () => {
       { category: "experience", text: "Did a thing", source: "resume_upload" },
     ]);
     expect(upserted[0]).toMatchObject({ source: "resume_upload" });
+  });
+
+  it("retries onto the next free label instead of overwriting when a concurrent writer already took the computed one", async () => {
+    // Seed F-001..F-003 as already taken, as if a concurrent request wrote
+    // F-004 the instant after this batch's up-front SELECT read max=3 —
+    // upsertFacts's first attempt at F-004 must collide (onConflictDoNothing
+    // returns no row) and retry at F-005, not silently overwrite F-004.
+    const { db, upserted } = fakeFactsDb({ existingLabels: ["F-001", "F-002", "F-003", "F-004"] });
+
+    const saved = await upsertFacts(db, "user-1", [{ category: "skill", text: "Rust" }]);
+
+    expect(saved.map((f) => f.label)).toEqual(["F-005"]);
+    // F-004 was never touched by this call — only F-005 was actually inserted.
+    expect(upserted).toHaveLength(1);
+    expect(upserted[0]).toMatchObject({ label: "F-005" });
+  });
+
+  it("preserves input order across a mixed batch of edits and new facts", async () => {
+    const { db } = fakeFactsDb({ existingLabels: ["F-001"] });
+
+    const saved = await upsertFacts(db, "user-1", [
+      { label: "F-001", category: "skill", text: "Edited" },
+      { category: "project", text: "New one" },
+    ]);
+
+    expect(saved.map((f) => f.label)).toEqual(["F-001", "F-002"]);
   });
 });
 
@@ -318,6 +371,13 @@ function fakeDeleteDb(seed: {
         }),
       };
     },
+    // deleteUserData wraps its DB work in `db.transaction(async (tx) => …)`.
+    // The fake has no real BEGIN/COMMIT semantics to model — it just runs
+    // the callback against itself, which is enough to exercise the delete
+    // order the real transaction body issues its statements in.
+    async transaction(fn: (tx: unknown) => Promise<void>) {
+      return fn(db);
+    },
   };
 
   return { db: db as unknown as Db, log };
@@ -369,7 +429,7 @@ describe("deleteUserData", () => {
     ]);
   });
 
-  it("does not let a failed storage cleanup stop the DB deletion from completing", async () => {
+  it("runs the storage cleanup before touching the database, and aborts the whole deletion (no DB row touched) when it fails", async () => {
     const { db, log } = fakeDeleteDb({ applicationRows: [], generationRows: [] });
 
     await expect(
@@ -380,8 +440,26 @@ describe("deleteUserData", () => {
           },
         },
       }),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow("storage is down");
 
+    // Nothing in Postgres was touched — the account is fully intact for a
+    // retry, rather than half-deleted with an orphaned resume left behind.
+    expect(log).toEqual([]);
+  });
+
+  it("still deletes everything when the storage cleanup succeeds", async () => {
+    const { db, log } = fakeDeleteDb({ applicationRows: [], generationRows: [] });
+    const storageLog: string[] = [];
+
+    await deleteUserData(db, "user-1", {
+      _internal: {
+        deleteResumeObjects: async () => {
+          storageLog.push("storage:deleteAll");
+        },
+      },
+    });
+
+    expect(storageLog).toEqual(["storage:deleteAll"]);
     expect(log).toContain("delete:profiles");
   });
 });
