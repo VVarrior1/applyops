@@ -13,6 +13,8 @@ Numbers below are real, pulled live from the database with
 demo dataset. Re-run that script any time to refresh them; nothing here is
 frozen except the screenshots.
 
+![The public landing page](docs/img/landing.png)
+
 ---
 
 ## 1. Eval scorecard
@@ -61,6 +63,11 @@ exceed [0,1]) — small samples show wide intervals rather than false
 precision.
 
 ![The owner's real funnel and eval scorecard, from the public /results page](docs/img/results.png)
+
+The same funnel, from the signed-in `/funnel` page the owner actually uses
+day to day (not redacted — it's the owner's own private view):
+
+![The signed-in /funnel page, week-by-week breakdown with Wilson CIs](docs/img/funnel.png)
 
 | Week | Applied | Responded | Interviewing | Offers | Response rate |
 |---|---|---|---|---|---|
@@ -182,10 +189,12 @@ flowchart TB
 
 Seven ATS vendors, hit through their official public JSON/XML endpoints
 (never a scraped HTML board, never LinkedIn/Indeed/JSearch/Adzuna) — a
-company import job resolves ~1.3k companies to a working (vendor, slug) pair
-out of a much larger candidate list (v1's 146-company allow-list plus an
-open companies-by-ATS dataset), and a daily GitHub Actions cron re-scrapes
-every one of them.
+company import job resolves 1,267 of 1,306 imported companies to a working
+(vendor, slug) pair on one of the seven vendors below (the remaining 39 stay
+in an `other`/unresolved bucket, contributing 1 active posting), out of a
+much larger candidate list (v1's 146-company allow-list plus an open
+companies-by-ATS dataset), and a daily GitHub Actions cron re-scrapes every
+one of them.
 
 Live counts, right now:
 
@@ -198,6 +207,7 @@ Live counts, right now:
 | Recruitee | 25 | 711 |
 | Personio | 8 | 25 |
 | YC (Work at a Startup) | 3 | 4 |
+| Other (unresolved vendor) | 39 | 1 |
 | **Total** | **1,306** | **41,991** (of 42,201 ever seen) |
 
 Every posting is filtered for entry-level relevance and a work-authorization
@@ -274,11 +284,13 @@ requires an interactive TTY and a deliberate override.
 - No Google OAuth yet — Supabase email magic link only (a later add, not in
   this scope).
 
-Three things remain manual, on purpose — see
+Five things remain manual, on purpose — see
 [`docs/USER_TODO.md`](docs/USER_TODO.md): grading the golden set for a real
-kappa number, confirming provider keys/magic-link delivery, and inviting the
-first users. Everything else — scraping, ranking, tailoring, fact-checking,
-the eval gate, the benchmark — runs unattended.
+kappa number, adding an `OPENAI_API_KEY` (and re-adding `ANTHROPIC_API_KEY`
+once it has credit), confirming magic-link email delivery, inviting the
+first users, and pointing Supabase Auth's redirect URL at the deployed
+Vercel URL. Everything else — scraping, ranking, tailoring, fact-checking,
+the eval gate, the benchmark, deployment — runs unattended.
 
 ## 9. Running it yourself
 

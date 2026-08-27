@@ -76,14 +76,17 @@ allow-list check.
 
 ## 5. From Step 1 (deploy) that needed the dashboard
 
-- **Supabase Auth redirect URL:** set to the production Vercel URL
-  (`https://<project>.vercel.app` or a custom domain) so magic-link emails
-  redirect back to the live site instead of `localhost`. Supabase dashboard →
-  Authentication → URL Configuration → **Site URL** and **Redirect URLs**
-  (add both the Vercel URL and `<url>/auth/callback`). The CLI/management API
-  does not expose this setting cleanly enough to script safely — do it
+- **Supabase Auth redirect URL:** set **Site URL** to
+  `https://applyops-two.vercel.app` and add both
+  `https://applyops-two.vercel.app` and
+  `https://applyops-two.vercel.app/auth/callback` to **Redirect URLs**, so
+  magic-link emails redirect back to the live site instead of `localhost`.
+  Supabase dashboard → Authentication → URL Configuration. The CLI/management
+  API does not expose this setting cleanly enough to script safely — do it
   directly at
   [supabase.com/dashboard/project/_/auth/url-configuration](https://supabase.com/dashboard/project/_/auth/url-configuration).
+  This is the one item that actually blocks magic-link login on production
+  until it's done.
 - **Custom domain (optional):** if you want something other than the default
   `*.vercel.app` URL, add it under the Vercel project's Settings → Domains,
   then update the Supabase redirect URL above to match.
