@@ -4,6 +4,7 @@ import { requireUser } from "@/src/auth/require";
 import { getDb } from "@/src/db/client";
 import { applications, companies, jobs, outcomeEvents } from "@/src/db/schema";
 import { OutcomeButtons } from "@/components/applications/OutcomeButtons";
+import { PendingApprovals } from "@/components/applications/PendingApprovals";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -37,6 +38,9 @@ const EVENT_LABEL: Record<string, string> = {
 /**
  * `/applications` — plan Task 10 Step 2: a table (company, title, status,
  * applied date, last event) with outcome-logging buttons per row.
+ *
+ * Also renders Task 15's `<PendingApprovals />` panel above the list — the
+ * apply agent's approval gate seen from the web app (spec §10).
  */
 export default async function ApplicationsPage() {
   const user = await requireUser();
@@ -89,14 +93,16 @@ export default async function ApplicationsPage() {
       <div>
         <h1 className="text-xl font-semibold">Applications</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Track outcomes for every application you&apos;ve sent. The funnel
-          derived from these events is on the{" "}
+          Everything you have applied to, and anything the apply agent is waiting on. The
+          funnel derived from these events is on the{" "}
           <a href="/funnel" className="underline underline-offset-2">
             Funnel
           </a>{" "}
           page.
         </p>
       </div>
+
+      <PendingApprovals userId={user.id} />
 
       <Table>
         <TableHeader>

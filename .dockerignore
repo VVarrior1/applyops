@@ -1,0 +1,26 @@
+# Keep the build context small — and, above all, keep secrets out of the image.
+.env
+.env.*
+!.env.example
+
+.git
+.github
+node_modules
+.next
+out
+build
+dist
+coverage
+playwright-report
+test-results
+tmp
+docs
+
+# Private candidate assets (also gitignored)
+public/apply_*.jpg
+public/resumes
+
+*.tsbuildinfo
+.DS_Store
+.vercel
+.supabase
