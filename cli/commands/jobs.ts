@@ -40,12 +40,15 @@ export function register(program: Command): void {
           values.push(codes);
           if (codes.length > 0) known += 1;
         }
-        // One UPDATE per batch via unnest; empty arrays are stored as '{}' (known-unknown), not NULL.
+        // One UPDATE per batch. Drizzle expands JS arrays into `$1, $2, ...`
+        // lists, so the batch travels as ONE jsonb parameter and is unpacked
+        // server-side with jsonb_array_elements.
+        const payload = JSON.stringify(ids.map((id, i) => ({ id, codes: values[i] })));
         await db.execute(sql`
-          update jobs as j set countries = v.codes
-          from (select unnest(${sql.raw(`ARRAY[${ids.map((id) => `'${id}'::uuid`).join(",")}]`)}) as id,
-                       unnest(${sql.raw(`ARRAY[${values.map((v) => `'{${v.join(",")}}'::text[]`).join(",")}]`)}) as codes) as v
-          where j.id = v.id
+          update jobs as j
+             set countries = coalesce((select array_agg(e) from jsonb_array_elements_text(v.item->'codes') as e), '{}'::text[])
+            from jsonb_array_elements(${payload}::jsonb) as v(item)
+           where j.id = (v.item->>'id')::uuid
         `);
         scanned += rows.length;
         offset += rows.length;
