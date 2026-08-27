@@ -1,0 +1,58 @@
+name: Scrape
+
+# 11:00 UTC = 05:00 America/Edmonton during MDT (04:00 during MST — GitHub
+# cron has no timezone, and an hour's drift twice a year does not matter for a
+# nightly job-board sweep). spec §6.
+on:
+  schedule:
+    - cron: "0 11 * * *"
+  workflow_dispatch:
+    inputs:
+      vendors:
+        description: "Comma-separated vendor subset (blank = all)"
+        required: false
+        default: ""
+      max_companies:
+        description: "Stop after this many companies (blank = no cap)"
+        required: false
+        default: ""
+
+# A run that overlaps the next night's would double the request rate at every
+# vendor; let the one already in flight finish.
+concurrency:
+  group: scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    # SmartRecruiters needs a second request per posting for the description,
+    # which makes it the long pole on a full ~1.3k-company sweep.
+    timeout-minutes: 90
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Inputs go through the environment, never through `${{ }}` inside the
+      # script: interpolating them into the command line would let a dispatch
+      # input run arbitrary shell on the runner.
+      - name: Scrape
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          VENDORS: ${{ inputs.vendors }}
+          MAX_COMPANIES: ${{ inputs.max_companies }}
+        run: |
+          args=()
+          if [ -n "$VENDORS" ]; then args+=(--vendors "$VENDORS"); fi
+          if [ -n "$MAX_COMPANIES" ]; then args+=(--max-companies "$MAX_COMPANIES"); fi
+          npm run scrape -- "${args[@]}"

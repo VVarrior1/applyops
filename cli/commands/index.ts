@@ -1,8 +1,10 @@
 import type { Command } from "commander";
 import { register as registerApply } from "./apply";
+import { register as registerCompanies } from "./companies";
 import { register as registerEval } from "./eval";
 import { register as registerGolden } from "./golden";
 import { register as registerOutcome } from "./outcome";
+import { register as registerScrape } from "./scrape";
 
 /**
  * Each CLI command lives in its own file and exports `register(program)`.
@@ -11,8 +13,9 @@ import { register as registerOutcome } from "./outcome";
  */
 export const registrars: Array<(program: Command) => void> = [
   registerApply,
+  registerCompanies,
   registerEval,
   registerGolden,
   registerOutcome,
-  // (tasks append here, e.g.)  registerScrape,
+  registerScrape,
 ];

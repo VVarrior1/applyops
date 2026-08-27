@@ -1,0 +1,153 @@
+{
+ "id": "744000145929979",
+ "name": "Engine Programmer - Ubisoft Paris - H/F/NB ",
+ "uuid": "53e84356-2d7a-4f33-901a-faee7ce1636b",
+ "jobId": "53646c51-d9c8-4e5e-b1a9-ec385f47c1e4",
+ "jobAdId": "94c76be7-73d5-4ad9-841d-88b2a4281727",
+ "defaultJobAd": true,
+ "refNumber": "REF30765Y",
+ "company": {
+  "name": "Ubisoft",
+  "identifier": "Ubisoft2"
+ },
+ "location": {
+  "city": "Montreuil",
+  "region": "IDF",
+  "country": "fr",
+  "postalCode": "93100",
+  "remote": false,
+  "hybrid": false,
+  "latitude": "48.861845",
+  "longitude": "2.4465697",
+  "fullLocation": "Montreuil, IDF, France"
+ },
+ "customField": [
+  {
+   "fieldId": "56c253c2e4b0cabf01d19d37",
+   "fieldLabel": "Organizational Unit",
+   "valueId": "940080fd-8618-4c6e-8db2-945da7831524",
+   "valueLabel": "Paris studio"
+  },
+  {
+   "fieldId": "58b7e4d0e4b09a6d37a0cd8b",
+   "fieldLabel": "Department",
+   "valueId": "775207",
+   "valueLabel": "Programming"
+  },
+  {
+   "fieldId": "56c2539de4b0cabf01d19d36",
+   "fieldLabel": "Recruitment Programs",
+   "valueId": "cb9660da-dde8-48ec-ba09-d33d9bb77edc",
+   "valueLabel": "N/A"
+  },
+  {
+   "fieldId": "5bb3995c6d8bc56bc081b87d",
+   "fieldLabel": "Contract",
+   "valueId": "b5a86fc0-2681-4b3c-98b6-b73a4be23ef1",
+   "valueLabel": "Permanent"
+  },
+  {
+   "fieldId": "COUNTRY",
+   "fieldLabel": "Country/Region",
+   "valueId": "fr",
+   "valueLabel": "France"
+  },
+  {
+   "fieldId": "6904797c56f594d5ed50988d",
+   "fieldLabel": "Work flexibility",
+   "valueId": "ccb10278-8410-4710-b0e7-698fc2195139",
+   "valueLabel": "Office-based"
+  },
+  {
+   "fieldId": "68e4ce369c52964c7125078a",
+   "fieldLabel": "Job Family",
+   "valueId": "43fccb43-cd89-4548-ab8b-24ab8e79edec",
+   "valueLabel": "Software Development"
+  },
+  {
+   "fieldId": "56d1aa7ae4b0a07f777a4ef4",
+   "fieldLabel": "Brands",
+   "valueId": "default",
+   "valueLabel": "Ubisoft"
+  },
+  {
+   "fieldId": "6904811aa8fa2db78e2ee2ed",
+   "fieldLabel": "Job  Function",
+   "valueId": "8e60dc05-6a4b-413f-b15f-d2835a159f14",
+   "valueLabel": "Software Development Core Tech"
+  },
+  {
+   "fieldId": "691ca2ee342dfb96e5364508",
+   "fieldLabel": "Reference Job",
+   "valueId": "ef182cae-3a69-46c2-8f03-438eb4eaf794",
+   "valueLabel": "Software Developer Core Tech Engine"
+  },
+  {
+   "fieldId": "6a158e3c77b1f5657b57af9d",
+   "fieldLabel": "Management Unit (New)",
+   "valueId": "36d02bfd-569a-4aef-9905-8679f578380c",
+   "valueLabel": "CREATIVE NETWORK"
+  },
+  {
+   "fieldId": "5def94650389ad3cc4be9d17",
+   "fieldLabel": "OU sub location (select when applicable)",
+   "valueId": "ac8ae7ad-70a6-491d-b848-4625c10b9609",
+   "valueLabel": "N/A"
+  }
+ ],
+ "releasedDate": "2026-08-27T09:05:04.997Z",
+ "creator": {
+  "name": "",
+  "avatarUrl": ""
+ },
+ "postingUrl": "https://jobs.smartrecruiters.com/Ubisoft2/744000145929979-engine-programmer-ubisoft-paris-h-f-nb-",
+ "applyUrl": "https://jobs.smartrecruiters.com/Ubisoft2/744000145929979-engine-programmer-ubisoft-paris-h-f-nb-?oga=true",
+ "referralUrl": "https://jobs.smartrecruiters.com/external-referrals/company/Ubisoft2/publication/53e84356-2d7a-4f33-901a-faee7ce1636b?dcr_ci=Ubisoft2",
+ "jobAd": {
+  "sections": {
+   "companyDescription": {
+    "title": "Description de l'entreprise",
+    "text": "<p>Ubisoft est une référence mondiale du jeu vidéo, avec des équipes réparties aux quatre coins du monde qui créent des expériences de jeu originales et mémorables, de Assassin’s Creed à Rainbow Six en passant par Just Dance et bien d’autres encore. Nous croyons que la diversité des points de vue fait progresser à la fois les joueurs et les équipes. Si vous êtes passionné·e par l’innovation et que vous souhaitez repousser les limites du divertissement, rejoignez notre aventure et aidez-nous à créer l’inconnu !&#xa0;</p><p>Studio pionnier d’Ubisoft, le studio de Paris est à l’origine des premiers succès de l’éditeur suite à sa création en 1992. Il est aujourd’hui à la tête de licences incontournables comme Just Dance, Ghost Recon ou Mario + The Lapins Crétins. Ubisoft Paris s’est également construit une solide réputation comme partenaire de choix dans les collaborations inter-studios comme Watch Dogs, Skull &amp; Bones, Beyond Good &amp; Evil 2 ou encore Star Wars. Fort de cette expérience, le studio continue d’aller plus loin en termes de créativité en travaillant sur des projets très prometteurs encore non-annoncés.&#xa0;&#xa0;</p>"
+   },
+   "jobDescription": {
+    "title": "Description du poste",
+    "text": "<ul><li>Vous interviendrez sur le développement, l'amélioration et l'optimisation de différents systèmes coté Engine,</li><li>Vous devrez garantir la robustesse et&#xa0;la performance de vos systèmes tout en vous assurant qu'ils soient&#xa0;correctement utilisés par les différents métiers (design, gameplay programmer,...etc)</li><li>De façon plus générale vous serez en charge de travailler sur&#xa0;des sujets bas niveau : performance, mémoire, threading, architecture...etc.</li><li>Faire de la veille technique, partager les&#xa0;résultats de cette dernière et proposer des solutions innovantes est également un attendu sur ce poste.</li></ul>"
+   },
+   "qualifications": {
+    "title": "Qualifications",
+    "text": "<ul><li>Vous avez une excellente maitrise&#xa0;du C++,&#xa0;</li><li>Vous avez une expérience en programmation dans notre industrie,</li><li>Vous avez une&#xa0;bonne compréhension du multithreading et de la programmation asynchrone,&#xa0;</li><li>Vous êtes intéressé(e) à l’idée de travailler sur des sujets liés à la GenAI,&#xa0;</li><li>Vous êtes à l’aise en anglais&#xa0;(oral et écrit).&#xa0;</li></ul><p><strong>C’est un vrai plus si :&#xa0;&#xa0;</strong></p><ul><li>Vous avez&#xa0;fait&#xa0;des projets&#xa0;professionnels&#xa0;ou&#xa0;personnels&#xa0;avec des moteurs de jeu,&#xa0;</li><li>Vous avez déjà travaillé en tant qu’Engine Programmer,&#xa0;</li></ul>"
+   },
+   "additionalInformation": {
+    "title": "Informations supplémentaires",
+    "text": "<p>Nous rejoindre c’est avoir accès dès le premier jour à :&#xa0;</p><ul><li><p>Notre plateforme interne de e-learning pour enfin vous former sur les outils dont vous aviez tant besoin ;&#xa0;</p></li></ul><ul><li><p>Notre ludothèque où vous pourrez emprunter les derniers jeux Ubisoft, ceux de la concurrence, consoles et jeux de sociétés ;&#xa0;</p></li></ul><ul><li><p>Notre CSE et ses tarifs préférentiels sur une large gamme de spectacles, salles de cinéma, concerts, salles de sport, parcs d’attractions, et pleins d’autres bons plans.&#xa0;</p></li></ul><p>Et après 1 an ?&#xa0;</p><ul><li><p>Vous avez un plan de carrière et d’évolution établis avec votre manager ainsi que des objectifs clairs qui vous permettront de progresser chaque année ;&#xa0;</p></li></ul><ul><li><p>Vous avez rejoint un de nos clubs : chorale, yoga, tennis, sabre laser… Ou vous avez créé le vôtre !&#xa0;&#xa0;</p></li></ul><ul><li><p>Vous profitez de votre pause déjeuner d’1h30 pour participer à un cours dans notre salle de sport ou emprunter un de nos vélos pour vous balader dans le bois de Vincennes ;&#xa0;</p></li></ul><ul><li><p>Vous attendez avec impatience le prochain week-end surf/yoga ou ski organisé par le CSE ;&#xa0;</p></li></ul><ul><li><p>Vous êtes devenu·e imbattable au babyfoot, à l’escalade, Just Dance ou à Boomerang Fu ;&#xa0;&#xa0;</p></li></ul><ul><li><p>Vous avez dévalisé la braderie interne pour compléter votre collection de goodies et jeux Ubi (parce qu’on n’en a jamais assez).&#xa0;</p></li></ul><p>En tant qu’employeur, Ubisoft offre à tous les mêmes opportunités d’accès à l’emploi, sans distinction notamment de genre, ethnicité, religion, orientation sexuelle, statut social, handicap et d’âge. Ubisoft veille à développer un environnement de travail inclusif qui reflète la diversité de sa communauté de joueurs dans ses équipes. &#xa0;</p>"
+   }
+  }
+ },
+ "active": true,
+ "visibility": "PUBLIC",
+ "industry": {
+  "id": "entertainment",
+  "label": "Entertainment"
+ },
+ "function": {
+  "id": "information_technology",
+  "label": "Information Technology"
+ },
+ "department": {
+  "id": 775207,
+  "label": "Programming"
+ },
+ "experienceLevel": {
+  "id": "mid_senior_level",
+  "label": "Mid-Senior Level"
+ },
+ "typeOfEmployment": {
+  "id": "permanent",
+  "label": "Full-time"
+ },
+ "language": {
+  "code": "fr",
+  "label": "French",
+  "labelNative": "français"
+ }
+}

@@ -214,6 +214,10 @@ export const jobs = pgTable(
     postedAt: timestamp("posted_at", { withTimezone: true }),
     scrapedAt: timestamp("scraped_at", { withTimezone: true }),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    // Set false by `runFinders` for postings no board has listed for 30 days
+    // (spec §6). Rows are never deleted — an application may point at a job
+    // that has since been taken down, and the funnel still has to explain it.
+    active: boolean("active").notNull().default(true),
     isEntryLevel: boolean("is_entry_level"),
     isRelevantRole: boolean("is_relevant_role"),
     workAuthSignal: workAuthSignalEnum("work_auth_signal"),

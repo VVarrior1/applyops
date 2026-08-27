@@ -1,0 +1,369 @@
+{
+ "offset": 0,
+ "limit": 100,
+ "totalFound": 3,
+ "content": [
+  {
+   "id": "744000145929979",
+   "name": "Engine Programmer - Ubisoft Paris - H/F/NB ",
+   "uuid": "53e84356-2d7a-4f33-901a-faee7ce1636b",
+   "jobAdId": "94c76be7-73d5-4ad9-841d-88b2a4281727",
+   "defaultJobAd": true,
+   "refNumber": "REF30765Y",
+   "company": {
+    "identifier": "Ubisoft2",
+    "name": "Ubisoft"
+   },
+   "releasedDate": "2026-08-27T09:05:04.997Z",
+   "location": {
+    "city": "Montreuil",
+    "region": "IDF",
+    "country": "fr",
+    "postalCode": "93100",
+    "remote": false,
+    "hybrid": false,
+    "latitude": "48.861845",
+    "longitude": "2.4465697",
+    "fullLocation": "Montreuil, IDF, France"
+   },
+   "industry": {
+    "id": "entertainment",
+    "label": "Entertainment"
+   },
+   "department": {
+    "id": "775207",
+    "label": "Programming"
+   },
+   "function": {
+    "id": "information_technology",
+    "label": "Information Technology"
+   },
+   "typeOfEmployment": {
+    "id": "permanent",
+    "label": "Full-time"
+   },
+   "experienceLevel": {
+    "id": "mid_senior_level",
+    "label": "Mid-Senior Level"
+   },
+   "customField": [
+    {
+     "fieldId": "56c253c2e4b0cabf01d19d37",
+     "fieldLabel": "Organizational Unit",
+     "valueId": "940080fd-8618-4c6e-8db2-945da7831524",
+     "valueLabel": "Paris studio"
+    },
+    {
+     "fieldId": "56c2539de4b0cabf01d19d36",
+     "fieldLabel": "Recruitment Programs",
+     "valueId": "cb9660da-dde8-48ec-ba09-d33d9bb77edc",
+     "valueLabel": "N/A"
+    },
+    {
+     "fieldId": "5bb3995c6d8bc56bc081b87d",
+     "fieldLabel": "Contract",
+     "valueId": "b5a86fc0-2681-4b3c-98b6-b73a4be23ef1",
+     "valueLabel": "Permanent"
+    },
+    {
+     "fieldId": "68e4ce369c52964c7125078a",
+     "fieldLabel": "Job Family",
+     "valueId": "43fccb43-cd89-4548-ab8b-24ab8e79edec",
+     "valueLabel": "Software Development"
+    },
+    {
+     "fieldId": "56d1aa7ae4b0a07f777a4ef4",
+     "fieldLabel": "Brands",
+     "valueId": "default",
+     "valueLabel": "Ubisoft"
+    },
+    {
+     "fieldId": "6904811aa8fa2db78e2ee2ed",
+     "fieldLabel": "Job  Function",
+     "valueId": "8e60dc05-6a4b-413f-b15f-d2835a159f14",
+     "valueLabel": "Software Development Core Tech"
+    },
+    {
+     "fieldId": "691ca2ee342dfb96e5364508",
+     "fieldLabel": "Reference Job",
+     "valueId": "ef182cae-3a69-46c2-8f03-438eb4eaf794",
+     "valueLabel": "Software Developer Core Tech Engine"
+    },
+    {
+     "fieldId": "6a158e3c77b1f5657b57af9d",
+     "fieldLabel": "Management Unit (New)",
+     "valueId": "36d02bfd-569a-4aef-9905-8679f578380c",
+     "valueLabel": "CREATIVE NETWORK"
+    },
+    {
+     "fieldId": "58b7e4d0e4b09a6d37a0cd8b",
+     "fieldLabel": "Department",
+     "valueId": "775207",
+     "valueLabel": "Programming"
+    },
+    {
+     "fieldId": "COUNTRY",
+     "fieldLabel": "Country/Region",
+     "valueId": "fr",
+     "valueLabel": "France"
+    },
+    {
+     "fieldId": "6904797c56f594d5ed50988d",
+     "fieldLabel": "Work flexibility",
+     "valueId": "ccb10278-8410-4710-b0e7-698fc2195139",
+     "valueLabel": "Office-based"
+    },
+    {
+     "fieldId": "5def94650389ad3cc4be9d17",
+     "fieldLabel": "OU sub location (select when applicable)",
+     "valueId": "ac8ae7ad-70a6-491d-b848-4625c10b9609",
+     "valueLabel": "N/A"
+    }
+   ],
+   "visibility": "PUBLIC",
+   "ref": "https://api.smartrecruiters.com/v1/companies/Ubisoft2/postings/744000145929979",
+   "language": {
+    "code": "fr",
+    "label": "French",
+    "labelNative": "français"
+   }
+  },
+  {
+   "id": "744000145918119",
+   "name": "Cloud Security Specialist – Detection Engineering",
+   "uuid": "326ad784-ca99-4ae3-bc04-ffa6b0fd0e06",
+   "jobAdId": "ef24cb96-0123-437a-9ff0-9adc21fbfd3c",
+   "defaultJobAd": false,
+   "refNumber": "REF31666I",
+   "company": {
+    "identifier": "Ubisoft2",
+    "name": "Ubisoft"
+   },
+   "releasedDate": "2026-08-27T08:07:04.061Z",
+   "location": {
+    "city": "Saint-Mandé",
+    "region": "IDF",
+    "country": "fr",
+    "postalCode": "94160",
+    "remote": false,
+    "hybrid": false,
+    "latitude": "48.84283199999999",
+    "longitude": "2.4178639",
+    "fullLocation": "Saint-Mandé, IDF, France"
+   },
+   "industry": {
+    "id": "it_and_services",
+    "label": "Information Technology And Services"
+   },
+   "department": {
+    "id": "13847731",
+    "label": "Ubisoft"
+   },
+   "function": {
+    "id": "information_technology",
+    "label": "Information Technology"
+   },
+   "typeOfEmployment": {
+    "id": "permanent",
+    "label": "Full-time"
+   },
+   "experienceLevel": {
+    "id": "mid_senior_level",
+    "label": "Mid-Senior Level"
+   },
+   "customField": [
+    {
+     "fieldId": "56c253c2e4b0cabf01d19d37",
+     "fieldLabel": "Organizational Unit",
+     "valueId": "721c58b3-5e0f-4dca-baba-1c5580c3f39b",
+     "valueLabel": "Ubisoft IT"
+    },
+    {
+     "fieldId": "5bb3995c6d8bc56bc081b87d",
+     "fieldLabel": "Contract",
+     "valueId": "b5a86fc0-2681-4b3c-98b6-b73a4be23ef1",
+     "valueLabel": "Permanent"
+    },
+    {
+     "fieldId": "68e4ce369c52964c7125078a",
+     "fieldLabel": "Job Family",
+     "valueId": "e3c9e4f4-a983-42c1-acfb-15a77c35f610",
+     "valueLabel": "Information & Systems"
+    },
+    {
+     "fieldId": "56d1aa7ae4b0a07f777a4ef4",
+     "fieldLabel": "Brands",
+     "valueId": "default",
+     "valueLabel": "Ubisoft"
+    },
+    {
+     "fieldId": "6904811aa8fa2db78e2ee2ed",
+     "fieldLabel": "Job  Function",
+     "valueId": "97c29ec2-7ebc-4c99-80e0-93f15c7df944",
+     "valueLabel": "IT Security"
+    },
+    {
+     "fieldId": "691ca2ee342dfb96e5364508",
+     "fieldLabel": "Reference Job",
+     "valueId": "e31978e1-e2f3-45cc-a326-f559a222a11b",
+     "valueLabel": "Security Specialist"
+    },
+    {
+     "fieldId": "6a158e3c77b1f5657b57af9d",
+     "fieldLabel": "Management Unit (New)",
+     "valueId": "f0bd3708-c5ff-47b1-9104-b83a1b4071d2",
+     "valueLabel": "UBISOFT"
+    },
+    {
+     "fieldId": "58b7e4d0e4b09a6d37a0cd8b",
+     "fieldLabel": "Department",
+     "valueId": "13847731",
+     "valueLabel": "Ubisoft"
+    },
+    {
+     "fieldId": "COUNTRY",
+     "fieldLabel": "Country/Region",
+     "valueId": "fr",
+     "valueLabel": "France"
+    },
+    {
+     "fieldId": "6904797c56f594d5ed50988d",
+     "fieldLabel": "Work flexibility",
+     "valueId": "ccb10278-8410-4710-b0e7-698fc2195139",
+     "valueLabel": "Office-based"
+    },
+    {
+     "fieldId": "5def94650389ad3cc4be9d17",
+     "fieldLabel": "OU sub location (select when applicable)",
+     "valueId": "dc4c4c86-673c-4594-bc36-6dbdd6310e11",
+     "valueLabel": "France"
+    }
+   ],
+   "visibility": "PUBLIC",
+   "ref": "https://api.smartrecruiters.com/v1/companies/Ubisoft2/postings/744000145918119",
+   "language": {
+    "code": "en",
+    "label": "English",
+    "labelNative": "English (US)"
+   }
+  },
+  {
+   "id": "744000145800584",
+   "name": "Développeur.euse de Communauté Senior (Projets non annoncés)",
+   "uuid": "2e3bc747-08d0-4adb-b88d-44f0def30722",
+   "jobAdId": "8e9b0947-dd28-4afb-bea5-b27e903b9c86",
+   "defaultJobAd": false,
+   "refNumber": "REF31821D",
+   "company": {
+    "identifier": "Ubisoft2",
+    "name": "Ubisoft"
+   },
+   "releasedDate": "2026-08-26T17:29:32.606Z",
+   "location": {
+    "city": "Montreal",
+    "region": "QC",
+    "country": "ca",
+    "remote": false,
+    "hybrid": false,
+    "latitude": "45.5018869",
+    "longitude": "-73.56739189999999",
+    "fullLocation": "Montreal, QC, Canada"
+   },
+   "industry": {
+    "id": "entertainment",
+    "label": "Entertainment"
+   },
+   "department": {
+    "id": "13847731",
+    "label": "Ubisoft"
+   },
+   "function": {
+    "id": "purchasing",
+    "label": "Purchasing"
+   },
+   "typeOfEmployment": {
+    "id": "permanent",
+    "label": "Full-time"
+   },
+   "experienceLevel": {
+    "id": "mid_senior_level",
+    "label": "Mid-Senior Level"
+   },
+   "customField": [
+    {
+     "fieldId": "56c253c2e4b0cabf01d19d37",
+     "fieldLabel": "Organizational Unit",
+     "valueId": "562562fb-aed4-418b-bb83-6b3e2b09c375",
+     "valueLabel": "Central Publishing"
+    },
+    {
+     "fieldId": "5bb3995c6d8bc56bc081b87d",
+     "fieldLabel": "Contract",
+     "valueId": "b5a86fc0-2681-4b3c-98b6-b73a4be23ef1",
+     "valueLabel": "Permanent"
+    },
+    {
+     "fieldId": "68e4ce369c52964c7125078a",
+     "fieldLabel": "Job Family",
+     "valueId": "3248d469-5642-4951-b422-99637d061ac3",
+     "valueLabel": "Marketing"
+    },
+    {
+     "fieldId": "56d1aa7ae4b0a07f777a4ef4",
+     "fieldLabel": "Brands",
+     "valueId": "default",
+     "valueLabel": "Ubisoft"
+    },
+    {
+     "fieldId": "6904811aa8fa2db78e2ee2ed",
+     "fieldLabel": "Job  Function",
+     "valueId": "aeb33a89-5afc-40be-9dfd-b2645881c55e",
+     "valueLabel": "Community Management"
+    },
+    {
+     "fieldId": "691ca2ee342dfb96e5364508",
+     "fieldLabel": "Reference Job",
+     "valueId": "25cb4210-c3c4-49f1-b7a6-ecaa37ca99de",
+     "valueLabel": "Community Management Developer"
+    },
+    {
+     "fieldId": "6a158e3c77b1f5657b57af9d",
+     "fieldLabel": "Management Unit (New)",
+     "valueId": "f0bd3708-c5ff-47b1-9104-b83a1b4071d2",
+     "valueLabel": "UBISOFT"
+    },
+    {
+     "fieldId": "58b7e4d0e4b09a6d37a0cd8b",
+     "fieldLabel": "Department",
+     "valueId": "13847731",
+     "valueLabel": "Ubisoft"
+    },
+    {
+     "fieldId": "COUNTRY",
+     "fieldLabel": "Country/Region",
+     "valueId": "ca",
+     "valueLabel": "Canada"
+    },
+    {
+     "fieldId": "6904797c56f594d5ed50988d",
+     "fieldLabel": "Work flexibility",
+     "valueId": "ccb10278-8410-4710-b0e7-698fc2195139",
+     "valueLabel": "Office-based"
+    },
+    {
+     "fieldId": "5def94650389ad3cc4be9d17",
+     "fieldLabel": "OU sub location (select when applicable)",
+     "valueId": "ac8ae7ad-70a6-491d-b848-4625c10b9609",
+     "valueLabel": "N/A"
+    }
+   ],
+   "visibility": "PUBLIC",
+   "ref": "https://api.smartrecruiters.com/v1/companies/Ubisoft2/postings/744000145800584",
+   "language": {
+    "code": "fr-CA",
+    "label": "French (Canada)",
+    "labelNative": "français (Canada)"
+   }
+  }
+ ]
+}

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<workzag-jobs>
+
+<position>
+    <id>2649847</id>
+    <subcompany>Bigpoint HoldCo GmbH</subcompany>
+    <office>Hamburg</office>
+    <department>Accounting</department>
+    <recruitingCategory>Recruiting Phase Standard - 2026</recruitingCategory>
+    <name>Hauptbuchhalter / Senior General Ledger Accountant (m/w/d)</name>
+    <jobDescriptions></jobDescriptions>
+    <employmentType>permanent</employmentType>
+    <seniority>experienced</seniority>
+    <schedule>full-time</schedule>
+    <occupation>general_other_accounting_finance</occupation>
+    <occupationCategory>accounting_and_finance</occupationCategory>
+    <createdAt>2026-05-28T09:50:40+00:00</createdAt>
+</position>
+
+<position>
+    <id>2723821</id>
+    <subcompany>Bigpoint Games Pte. Ltd.</subcompany>
+    <office>Singapore</office>
+    <department>Product Marketing</department>
+    <recruitingCategory>Recruiting Phase Standard - 2026</recruitingCategory>
+    <name>Junior Platform Developer, AdTech (Chinese/English)</name>
+    <jobDescriptions>
+        <jobDescription>
+            <name>Your Job</name>
+            <value>
+                <![CDATA[We are looking for a Junior Platform Developer to support our gaming platform, advertising technology integrations, and marketing/UA-related technical operations.<br><br>This role works with platform engineers, business teams, UA/marketing teams, ad partners, vendors, and external technical teams.<br><br>The main focus is on platform development support, technical integration, debugging, QA, documentation, and operational support for game-related systems.<br><br>The role will also support advertising-related workflows, including ad tracking, campaign setup checks, GTM/CMP coordination, ads.txt updates, reporting validation, and basic UA campaign execution.<br><br>The candidate does not need to be an advertising expert, but should have a technical foundation, strong willingness to learn, attention to detail, and good communication skills in Chinese and English.]]>
+            </value>
+        </jobDescription>
+        <jobDescription>
+            <name>Responsibilities</name>
+            <value>
+                <![CDATA[<ul><li><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Support platform development and maintenance for game-related web services, payment flows, tracking integrations, and partner-facing technical workflows.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Assist with technical implementation, testing, and troubleshooting of platform features, partner integrations, advertising tags, tracking pixels, campaign parameters, and reporting events.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Support UA campaign execution, including basic media buying setup, campaign launch checks, tracking validation, performance monitoring, and coordination with UA partners.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Help maintain and validate GTM, CMP, partner tags, anding page tracking, registration/login conversion tracking, and other advertising-related configurations.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Perform QA across browsers, devices, countries, domains, landing pages, registration flows, payment flows, and game contexts.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Use browser developer tools to inspect network requests, console errors, redirects, cookies, local storage, script loading, tracking calls, and player-facing issues.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Investigate and document issues such as missing tags, broken tracking, no-fill, blocked scripts, CMP overlay problems, duplicate tracking, reporting discrepancies, callback issues, or player-facing ad errors.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Coordinate with internal engineers, ad partners, vendors, product teams, payment/platform teams, and UA/marketing teams to collect information and follow up on technical issues.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Help ensure advertising, tracking, and platform changes do not negatively affect player experience, registration, login, payment, or reward flows.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Maintain technical notes, QA checklists, troubleshooting records, partner setup documentation, and handover materials.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Translate technical and business communication between Chinese and English-speaking stakeholders.</p></li></ul>]]>
+            </value>
+        </jobDescription>
+        <jobDescription>
+            <name>Requirements</name>
+            <value>
+                <![CDATA[<ul><li><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Fluent in Chinese and English.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">0–4 years of experience in software development, platform development, web development, QA engineering, technical support, web operations, ad operations, UA operations, or a related field.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Basic technical foundation in web technologies such as HTML, JavaScript, HTTP, URLs, query parameters, redirects, cookies, and browser behavior.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Able to read technical documentation and convert requirements into test steps, implementation notes, or troubleshooting records.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Has a basic technical foundation or a strong willingness to learn technical tools and concepts, including browser developer tools.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Strong attention to detail and ability to follow QA checklists.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Good communication skills with both technical and non-technical stakeholders.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Interest in games, web platforms, advertising technology, or digital marketing technology.</p></li></ul><em>Nice to Have:</em><ul><li><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Basic experience with PHP, JavaScript, SQL, Git, APIs, logs, or web service debugging.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Experience with Google Tag Manager, Google Ads, Google Analytics, Google Ad Manager, InMobi CMP, affiliate tracking, or ad network dashboards.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Familiarity with tracking pixels, conversion events, landing page tags, campaign parameters, video/display/rewarded ads, ad players, waterfalls, bidding, or no-fill troubleshooting.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Basic understanding of digital advertising metrics such as impressions, clicks, CTR, conversions, fill rate, no-fill, completion rate, revenue, eCPM, and reporting discrepancies.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Basic understanding of CDN, DNS, <span style="background:none;">CNAME</span>, <span style="background:none;">SSL</span>, <span style="background:none;">CORS</span>, cache behavior, first-party vs third-party domains, <span style="background:none;">GDPR</span>, cookie consent, CMP, or <span style="background:none;">TCF</span>.</p></li><li style="margin-top:4px;"><p style="margin:0px;padding:0px;font:400 14px/1.714 'Atlassian Sans', 'ui-sans-serif', '-apple-system', BlinkMacSystemFont, 'Segoe UI', Ubuntu, 'Helvetica Neue', sans-serif;">Experience working with external partners, vendors, or cross-region teams.</p></li></ul>]]>
+            </value>
+        </jobDescription>
+        <jobDescription>
+            <name>Please note</name>
+            <value>
+                <![CDATA[Please note that we only accept applications via our career page. Applications via e-mail will not be considered. Thank you!]]>
+            </value>
+        </jobDescription>
+    </jobDescriptions>
+    <employmentType>permanent</employmentType>
+    <seniority>entry-level</seniority>
+    <schedule>full-time</schedule>
+    <occupation>media_planning_and_buying</occupation>
+    <occupationCategory>marketing_and_product</occupationCategory>
+    <createdAt>2026-07-22T13:48:14+00:00</createdAt>
+</position>
+
+</workzag-jobs>
