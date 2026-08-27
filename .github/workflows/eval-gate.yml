@@ -1,0 +1,91 @@
+name: Eval gate
+
+# Spec §7: "It refuses to get worse."
+#
+# Any change to a prompt, a pipeline step, the eval harness itself or the model
+# layer re-runs a 20-item subset of the frozen golden set and blocks the PR if
+# quality regressed. Merging to `main` re-runs the full 40 and stamps the result
+# as the new baseline that later PRs are measured against.
+#
+# The paths list is the whole point of the gate being cheap: a CSS change does
+# not spend money on an eval run.
+
+on:
+  pull_request:
+    paths:
+      - "src/pipeline/**"
+      - "src/eval/**"
+      - "src/llm/**"
+      - ".github/workflows/eval-gate.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/pipeline/**"
+      - "src/eval/**"
+      - "src/llm/**"
+      - ".github/workflows/eval-gate.yml"
+
+# Every run costs real model tokens. Superseded pushes to the same PR are
+# cancelled; baseline runs on `main` are allowed to finish (cancelling one
+# would leave `main` without a fresh baseline).
+concurrency:
+  group: eval-gate-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gate:
+    name: Golden-set regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      # A fork PR gets no secrets, so the eval would fail on a missing
+      # DATABASE_URL and look like a quality regression. Say what actually
+      # happened instead.
+      - name: Check secrets are available
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL is not set. Fork pull requests cannot run the eval gate; a maintainer must re-run it from a branch in this repository."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # PR: 20 items, gate on. `--gate` makes the CLI exit 1 on a regression
+      # and append its verdict (including the run's cost) to the job summary.
+      - name: Eval gate (20 items)
+        if: github.event_name == 'pull_request'
+        run: npm run eval -- --step tailor --items 20 --gate --git-sha "${{ github.event.pull_request.head.sha }}"
+
+      # main: the full golden set becomes the new baseline. The gate still
+      # applies — a regression that reached `main` should be loud — but a
+      # baseline run has nothing to compare itself against by construction, so
+      # in practice only the hallucination ceiling and the coverage checks bite.
+      - name: Baseline run (40 items)
+        if: github.event_name == 'push'
+        run: npm run eval -- --step tailor --baseline --gate --git-sha "${{ github.sha }}"
+
+      # Uploaded even on failure: the red build's report is the artifact
+      # someone actually wants to open.
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report-${{ github.run_id }}
+          path: |
+            eval-report.json
+            eval-report.html
+          if-no-files-found: warn
