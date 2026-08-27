@@ -20,6 +20,7 @@
     "@ai-sdk/anthropic": "^4.0.44",
     "@ai-sdk/google": "^4.0.54",
     "@ai-sdk/openai": "^4.0.50",
+    "@ai-sdk/react": "^4.0.86",
     "@anthropic-ai/sdk": "^0.121.0",
     "@base-ui/react": "^1.7.0",
     "@react-pdf/renderer": "^4.8.1",

@@ -1,5 +1,5 @@
 /**
- * The six pipeline steps (spec §5), re-exported from one place so callers
+ * The pipeline steps (spec §5, plus `guide`), re-exported from one place so callers
  * (`src/rank`, `src/eval`, `app/api/**`, `cli/`) import from
  * `src/pipeline/steps` rather than reaching into individual files.
  */
@@ -30,6 +30,17 @@ export {
   type RunSuggestArgs,
   type SuggestResult,
 } from "./suggest";
+export {
+  runGuide,
+  buildGuidePrompt,
+  checkGuideCitations,
+  stripUnsupportedGuideClaims,
+  renderFunnel,
+  type GuideFunnel,
+  type GuidePrefs,
+  type RunGuideArgs,
+  type GuideResult,
+} from "./guide";
 export {
   runJudge,
   buildJudgePrompt,

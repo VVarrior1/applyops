@@ -57,6 +57,20 @@
       "when": 1787873150157,
       "tag": "0007_countries_on_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787873799563,
+      "tag": "0008_many_psynapse",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787873807743,
+      "tag": "0009_guide_rls",
+      "breakpoints": true
     }
   ]
 }

@@ -19,6 +19,7 @@ import type {
   AnalyzeOutput,
   FitOutput,
   Fact,
+  GuideOutput,
 } from "../pipeline/schemas";
 
 /**
@@ -59,6 +60,13 @@ export const stepEnum = pgEnum("step", [
   "suggest",
   "judge",
   "extract_facts",
+  // Added by the Guide feature. `guide` is the whole-search outlook generated
+  // once per user and cached in `guides`; `chat` is one turn of the grounded
+  // career-coach conversation on `/guide`. Both go through the same
+  // prompt-version + generations + budget machinery as the job-level steps, so
+  // their cost shows up in `usage_daily` and `/benchmark` alongside the rest.
+  "guide",
+  "chat",
 ]);
 
 /**
@@ -102,6 +110,11 @@ export const applicationStatusEnum = pgEnum("application_status", [
   "ghosted",
   "withdrawn",
 ]);
+
+/** Who wrote a `chat_messages` row. Only these two roles are persisted — the
+ * system prompt is rebuilt from live profile data on every request rather than
+ * stored, so a fact the user edits is reflected in the next turn. */
+export const chatRoleEnum = pgEnum("chat_role", ["user", "assistant"]);
 
 export const workAuthSignalEnum = pgEnum("work_auth_signal", [
   "hires_canadians",
@@ -412,6 +425,85 @@ export const evalResults = pgTable("eval_results", {
   costUsd: numeric("cost_usd", { precision: 10, scale: 6 }),
   latencyMs: integer("latency_ms"),
 });
+
+// ---------------------------------------------------------------------------
+// Guide (personalized outlook + grounded chat)
+// ---------------------------------------------------------------------------
+
+/**
+ * Cache of `guide` step outputs. The `/guide` page renders the newest row for
+ * the user and "Regenerate" appends another, so the history is kept: an
+ * outlook written in September is the record of what the advice was then, and
+ * comparing it against a December one is the point.
+ *
+ * `output` holds the *checked* guide — claims whose `fact_ids` could not be
+ * traced back to a confirmed fact are stripped before it is stored (same rule
+ * as `tailor`'s PDF, spec §5). The unfiltered model reply is still in
+ * `generations.output` via `generation_id` for debugging.
+ */
+export const guides = pgTable(
+  "guides",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => profiles.userId),
+    generationId: uuid("generation_id").references(() => generations.id),
+    output: jsonb("output").$type<GuideOutput>().notNull(),
+    modelId: text("model_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("guides_user_created_idx").on(t.userId, t.createdAt)],
+);
+
+/**
+ * A chat conversation. v1 gives each user exactly one thread (created on their
+ * first message), but the schema is thread-based so "new conversation" is a
+ * later insert rather than a later migration. `model_id` is the model the user
+ * last picked in the model select, so their choice survives a reload.
+ */
+export const chatThreads = pgTable(
+  "chat_threads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => profiles.userId),
+    title: text("title"),
+    modelId: text("model_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("chat_threads_user_created_idx").on(t.userId, t.createdAt)],
+);
+
+/**
+ * One turn. Token counts and cost are denormalized onto the assistant rows (a
+ * user row has none) so the per-message cost hint in the UI is a plain read
+ * rather than a join back through `generations`.
+ */
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => chatThreads.id),
+    role: chatRoleEnum("role").notNull(),
+    content: text("content").notNull(),
+    modelId: text("model_id"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    costUsd: numeric("cost_usd", { precision: 10, scale: 6 }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("chat_messages_thread_created_idx").on(t.threadId, t.createdAt)],
+);
 
 export const usageDaily = pgTable(
   "usage_daily",

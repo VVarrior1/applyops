@@ -268,6 +268,157 @@ export const SuggestOutput = z.object({
 export type SuggestOutput = z.infer<typeof SuggestOutput>;
 
 // ---------------------------------------------------------------------------
+// guide  (whole-search outlook — one per user, cached in `guides`)
+// ---------------------------------------------------------------------------
+
+/** How long closing a gap realistically takes, so a plan can be sequenced. */
+export const GapEffort = z.enum(["days", "weeks", "months"]);
+export type GapEffort = z.infer<typeof GapEffort>;
+
+/**
+ * One thing to do, why it matters, and the facts it builds on. `fact_ids` may
+ * be empty for an action that is not a claim about the candidate's history
+ * ("apply to 8 postings a week"); it must never contain a label the user does
+ * not have. See `checkGuideCitations()` in `src/pipeline/steps/guide.ts`.
+ */
+export const GuideAction = z.object({
+  action: z
+    .string()
+    .min(1)
+    .describe("One concrete, checkable action. Never 'network more'."),
+  why: z.string().min(1).describe("One sentence tying it to this candidate."),
+  fact_ids: z
+    .array(z.string())
+    .describe(
+      "Labels of the facts this action builds on, e.g. ['F-014']. Empty only when the action makes no claim about the candidate's history.",
+    ),
+});
+export type GuideAction = z.infer<typeof GuideAction>;
+
+export const GuideOutput = z.object({
+  where_you_stand: z
+    .string()
+    .min(1)
+    .describe(
+      "3-5 sentences: an honest read of this candidate's position in this market right now, grounded in their facts.",
+    ),
+  strengths: z
+    .array(
+      z.object({
+        text: z
+          .string()
+          .min(1)
+          .describe("One strength, phrased as what it lets them apply to."),
+        fact_ids: z
+          .array(z.string())
+          .describe("Labels of the facts that evidence it. Never empty."),
+      }),
+    )
+    .describe("3-6 strengths, each cited. Strongest first."),
+  realistic_targets: z.object({
+    role_types: z
+      .array(z.string())
+      .describe("3-6 role titles they can realistically land, most likely first."),
+    company_types: z
+      .array(z.string())
+      .describe("3-5 kinds of employer where those roles actually exist for them."),
+    geographies: z
+      .array(
+        z.object({
+          region: z.string().min(1).describe("e.g. Calgary, Toronto, US remote"),
+          why: z.string().min(1).describe("Why this market fits this candidate."),
+          notes_for_canadians: z
+            .string()
+            .min(1)
+            .describe(
+              "The work-authorization reality for a Canadian citizen in this market: TN, H-1B lottery, Canada-based remote, or 'not applicable — this is Canada'.",
+            ),
+        }),
+      )
+      .describe("2-4 markets, best first."),
+  }),
+  gaps: z
+    .array(
+      z.object({
+        gap: z.string().min(1),
+        why_it_matters: z
+          .string()
+          .min(1)
+          .describe("What it costs them in screens or interviews."),
+        how_to_close: z
+          .string()
+          .min(1)
+          .describe("One concrete, time-boxed action. Never 'learn X'."),
+        effort: GapEffort,
+      }),
+    )
+    .describe("3-5 real gaps against their stated targets, most damaging first."),
+  plan_30_60_90: z
+    .object({
+      days_30: z.array(GuideAction).describe("3-5 actions for the first 30 days."),
+      days_60: z.array(GuideAction).describe("2-4 actions for days 31-60."),
+      days_90: z.array(GuideAction).describe("2-4 actions for days 61-90."),
+    })
+    .describe("A sequenced plan; later phases build on earlier ones."),
+  interview_prep_focus: z
+    .array(
+      z.object({
+        topic: z.string().min(1),
+        why: z
+          .string()
+          .min(1)
+          .describe("Why this topic, for these targets and these facts."),
+        resources_hint: z
+          .string()
+          .min(1)
+          .describe("A kind of resource or drill, not a URL."),
+      }),
+    )
+    .describe("3-5 topics, in the order they should be studied."),
+  positioning_tips: z
+    .array(z.string())
+    .describe("3-6 specific things to change in how they present themselves."),
+  application_cadence: z.object({
+    per_week: z
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .describe("Applications per week this candidate can sustain at quality."),
+    rationale: z
+      .string()
+      .min(1)
+      .describe("Why that number, given their time and the tailoring effort."),
+  }),
+  market_notes: z
+    .array(z.string())
+    .describe("3-5 things about the current market that change their strategy."),
+  caveats: z
+    .array(z.string())
+    .describe(
+      "2-4 honest limits on this advice: what it is guessing at, and what would change it.",
+    ),
+});
+export type GuideOutput = z.infer<typeof GuideOutput>;
+
+// ---------------------------------------------------------------------------
+// chat  (one turn of the grounded career-coach conversation on /guide)
+// ---------------------------------------------------------------------------
+
+/**
+ * `chat` is the one step that streams free text rather than a structured
+ * object, so it never goes through `callStructured()`/`Output.object()`. This
+ * schema exists because every step has one: it is the shape of the
+ * `generations.output` row the chat route writes after a turn finishes, which
+ * is what keeps the step's cost and history readable by the same tooling as
+ * everything else.
+ */
+export const ChatOutput = z.object({
+  text: z.string().describe("The assistant's reply, as sent to the user."),
+});
+export type ChatOutput = z.infer<typeof ChatOutput>;
+
+// ---------------------------------------------------------------------------
 // judge  (fixed model; grades a tailor output — spec §7)
 // ---------------------------------------------------------------------------
 
@@ -308,6 +459,8 @@ export const SCHEMA_BY_STEP = {
   suggest: SuggestOutput,
   judge: JudgeOutput,
   extract_facts: ExtractFactsOutput,
+  guide: GuideOutput,
+  chat: ChatOutput,
 } as const satisfies Record<Step, z.ZodType>;
 
 /** The output type of each step, keyed by step name. */

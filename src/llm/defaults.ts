@@ -57,6 +57,19 @@ export const DEFAULT_MODEL_BY_STEP: Record<Step, ModelId> = {
   // Not benchmarked: there is no golden set of resumes to grade extraction
   // against, and the step runs once per user per upload, so its cost is noise.
   extract_facts: "google:gemini-3.7-flash",
+
+  // Not benchmarked: the golden set is job postings, and `guide` takes no job
+  // at all — it reasons over a whole profile. It runs at most a handful of
+  // times per user (once, then on demand from the Regenerate button), so it
+  // sits with the other unbenchmarked steps on the model that won every step
+  // that *was* measured, rather than on the cheaper flash-lite that lost all
+  // four of them on grounding.
+  guide: "google:gemini-3.7-flash",
+
+  // The default the `/guide` model picker starts on. Unlike every other entry
+  // here this one is a *default*, not a decision: the picker lists every model
+  // whose provider has a key and the user's choice is stored on the thread.
+  chat: "google:gemini-3.7-flash",
 };
 
 /**
