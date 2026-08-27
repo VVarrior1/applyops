@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
 import { generations, promptVersions } from "../../src/db/schema";
+import { DEFAULT_MODEL_BY_STEP, JUDGE_MODEL_ID } from "../../src/llm/defaults";
 import type { Db } from "../../src/db/client";
 import { loadPrompt } from "../../src/pipeline/prompt-versions";
 import type { AnalyzeOutput, Fact, FitOutput } from "../../src/pipeline/schemas";
@@ -142,7 +143,7 @@ describe("runAnalyze", () => {
     const gen = generationRows()[0];
     expect(gen).toMatchObject({
       step: "analyze",
-      modelId: "anthropic:claude-haiku-4-5",
+      modelId: DEFAULT_MODEL_BY_STEP.analyze,
       promptVersionId: "pv-1",
       jobId: "22222222-2222-4222-8222-222222222222",
       userId: null,
@@ -267,7 +268,7 @@ describe("runTailor", () => {
       _internal: { model },
     });
 
-    expect(generationRows()[0].modelId).toBe("anthropic:claude-sonnet-5");
+    expect(generationRows()[0].modelId).toBe(DEFAULT_MODEL_BY_STEP.tailor);
   });
 });
 
@@ -320,7 +321,7 @@ describe("runJudge", () => {
     });
 
     expect(result.output.grounding).toBe(5);
-    expect(generationRows()[0].modelId).toBe("anthropic:claude-sonnet-5");
+    expect(generationRows()[0].modelId).toBe(JUDGE_MODEL_ID);
     expect(sent()).toContain("fact_ids");
     expect(sent()).toContain("F-001");
   });

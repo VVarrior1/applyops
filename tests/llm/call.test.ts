@@ -3,6 +3,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { APICallError } from "ai";
 import { z } from "zod";
 import { generations, profiles, usageDaily } from "../../src/db/schema";
+import { DEFAULT_MODEL_BY_STEP } from "../../src/llm/defaults";
 import type { Db } from "../../src/db/client";
 import { LlmError } from "../../src/llm/model-id";
 import { BudgetExceededError } from "../../src/llm/budget";
@@ -157,7 +158,7 @@ describe("callStructured — happy path", () => {
       promptVersionId: baseArgs.promptVersionId,
       _internal: { model: scriptedModel(['{"ok":true}']) },
     });
-    expect(genRows[0].modelId).toBe("anthropic:claude-sonnet-5");
+    expect(genRows[0].modelId).toBe(DEFAULT_MODEL_BY_STEP.tailor);
   });
 
   it("charges a real user's usage_daily after a successful call", async () => {

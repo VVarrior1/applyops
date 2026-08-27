@@ -18,12 +18,17 @@ import type { Step } from "../db/schema";
 import type { ModelId } from "./model-id";
 
 export const DEFAULT_MODEL_BY_STEP: Record<Step, ModelId> = {
-  analyze: "anthropic:claude-haiku-4-5",
-  fit: "anthropic:claude-haiku-4-5",
-  tailor: "anthropic:claude-sonnet-5",
-  suggest: "anthropic:claude-sonnet-5",
-  judge: "anthropic:claude-sonnet-5",
-  extract_facts: "anthropic:claude-haiku-4-5",
+  // 2026-08-27: Gemini 3.7 Flash is the provisional default for every step.
+  // Reason: the only Anthropic keys available have no credit balance, and
+  // Gemini 3.7 Flash is cheaper than Haiku 4.5 ($0.75/$3.75 vs $1/$5 per 1M).
+  // The `bench` command re-decides these per step once Claude models are
+  // callable again; update the run id in the comment when that happens.
+  analyze: "google:gemini-3.7-flash",
+  fit: "google:gemini-3.7-flash",
+  tailor: "google:gemini-3.7-flash",
+  suggest: "google:gemini-3.7-flash",
+  judge: "google:gemini-3.7-flash",
+  extract_facts: "google:gemini-3.7-flash",
 };
 
 /**
@@ -32,7 +37,7 @@ export const DEFAULT_MODEL_BY_STEP: Record<Step, ModelId> = {
  * or the comparison measures nothing. `bench`/`eval` may vary the *step*
  * model freely, never this one.
  */
-export const JUDGE_MODEL_ID: ModelId = "anthropic:claude-sonnet-5";
+export const JUDGE_MODEL_ID: ModelId = "google:gemini-3.7-flash"; // provisional: see DEFAULT_MODEL_BY_STEP note; spec §8 intends claude-sonnet-5 once credits exist
 
 export function defaultModelForStep(step: Step): ModelId {
   return DEFAULT_MODEL_BY_STEP[step];
