@@ -145,7 +145,7 @@ export function GuideChat({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 shrink-0">
         <div>
           <h2 className="text-sm font-semibold">Ask about your search</h2>
           <p className="text-xs text-muted-foreground">
@@ -182,7 +182,14 @@ export function GuideChat({
 
       <div
         ref={messagesRef}
-        className="flex min-h-64 flex-1 flex-col gap-3 overflow-y-auto rounded-lg border p-3"
+        // `min-h-0` (not `min-h-64`): GuideWorkspace caps this column's
+        // height at every breakpoint now, so this list always has a
+        // container to fill and never needs a floor — and a floor here
+        // would fight the cap the same way it used to on `lg` (Tailwind
+        // emits `.min-h-0` before `.min-h-64` in its generated CSS, so at
+        // equal specificity the floor would silently win and reintroduce
+        // the overflow this fix removes).
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-lg border p-3"
       >
         {messages.length === 0 && (
           <p className="text-sm text-muted-foreground">
@@ -239,7 +246,7 @@ export function GuideChat({
       )}
 
       {suggestedQuestions.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-1.5 shrink-0">
           {suggestedQuestions.map((question) => (
             <button
               key={question}
@@ -260,7 +267,7 @@ export function GuideChat({
       )}
 
       <form
-        className="flex items-end gap-2"
+        className="flex items-end gap-2 shrink-0"
         onSubmit={(event) => {
           event.preventDefault();
           send(input);

@@ -84,7 +84,15 @@ export function GuideWorkspace({
         error={error}
         onRegenerate={() => void handleRegenerate()}
       />
-      <div className="lg:sticky lg:top-6 lg:h-[calc(100vh-6rem)]">
+      {/*
+       * The height cap applies at every breakpoint, not just `lg:` — below
+       * `lg` this stacks under GuideView in normal flow, but without a cap
+       * the message list (which only scrolls internally, see GuideChat) can
+       * still grow to fill an unbounded column and push the composer far off
+       * the bottom of a tall page. `dvh` (not `vh`) so mobile browser chrome
+       * that shows/hides on scroll is accounted for.
+       */}
+      <div className="h-[calc(100dvh-3rem)] lg:sticky lg:top-6">
         <GuideChat
           initialMessages={chatMessages}
           initialModelId={chatModelId}

@@ -22,6 +22,10 @@ import { Fragment, type ReactNode } from "react";
  * shown literally.
  */
 
+// Pulls the link text and url back out of a token already matched by the
+// `\[...\]\(...\)` alternative of INLINE_PATTERN below.
+const LINK_PARTS = /^\[([^\]\n]+)\]\(([^)\s]+)\)$/;
+
 // Bold spans use a lazy `[\s\S]+?` body (rather than `[^*]+`) so a bold span
 // can contain other inline markup — e.g. inline code or a nested italic —
 // which is then picked up by the recursive call below. Single-asterisk and
@@ -29,8 +33,10 @@ import { Fragment, type ReactNode } from "react";
 // boundary checks so they don't fire inside plain prose: `\*(?![\s])...` (no
 // space right after the opening `*`, none right before the closing one) skips
 // `5 * 3`, and `(?<![A-Za-z0-9])_..._(?![A-Za-z0-9])` skips `my_file_name`.
+// The link alternative (`[text](url)`) goes first so it is captured whole
+// before the emphasis alternatives get a chance to look inside it.
 const INLINE_PATTERN =
-  /(`[^`]+`|\*\*[\s\S]+?\*\*|__[\s\S]+?__|\*(?![\s])[^*]+(?<![\s])\*|(?<![A-Za-z0-9])_[^_]+_(?![A-Za-z0-9]))/g;
+  /(\[[^\]\n]+\]\([^)\s]+\)|`[^`]+`|\*\*[\s\S]+?\*\*|__[\s\S]+?__|\*(?![\s])[^*]+(?<![\s])\*|(?<![A-Za-z0-9])_[^_]+_(?![A-Za-z0-9]))/g;
 
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = [];
@@ -58,6 +64,28 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
           {token.slice(1, -1)}
         </code>,
       );
+    } else if (token.startsWith("[")) {
+      const parts = LINK_PARTS.exec(token);
+      const url = parts?.[2] ?? "";
+      // Only ever emit an http(s) href — anything else (e.g. `javascript:`)
+      // falls through to the link's literal source text as a plain node,
+      // since this component never uses dangerouslySetInnerHTML and an
+      // unrecognized scheme has no safe rendering as a link.
+      if (parts && (url.startsWith("http://") || url.startsWith("https://"))) {
+        nodes.push(
+          <a
+            key={nodeKey}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            {renderInline(parts[1], nodeKey)}
+          </a>,
+        );
+      } else {
+        nodes.push(token);
+      }
     } else if (token.startsWith("**") || token.startsWith("__")) {
       nodes.push(
         <strong key={nodeKey}>{renderInline(token.slice(2, -2), nodeKey)}</strong>,
@@ -76,6 +104,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
 const UL_ITEM = /^\s*[-*]\s+(.*)$/;
 const OL_ITEM = /^\s*\d+\.\s+(.*)$/;
 const FENCE = /^\s*```/;
+const HEADING = /^\s{0,3}(#{1,6})\s+(.*)$/;
 
 export function ChatMarkdown({ text }: { text: string }) {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
@@ -107,6 +136,24 @@ export function ChatMarkdown({ text }: { text: string }) {
           <code>{codeLines.join("\n")}</code>
         </pre>,
       );
+      continue;
+    }
+
+    const headingMatch = HEADING.exec(line);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const key = blockKey++;
+      blocks.push(
+        <p
+          key={`b-${key}`}
+          className={
+            level <= 2 ? "text-base font-semibold" : "text-sm font-semibold"
+          }
+        >
+          {renderInline(headingMatch[2], `h-${key}`)}
+        </p>,
+      );
+      i++;
       continue;
     }
 
@@ -154,7 +201,8 @@ export function ChatMarkdown({ text }: { text: string }) {
       lines[i].trim() !== "" &&
       !UL_ITEM.test(lines[i]) &&
       !OL_ITEM.test(lines[i]) &&
-      !FENCE.test(lines[i])
+      !FENCE.test(lines[i]) &&
+      !HEADING.test(lines[i])
     ) {
       paraLines.push(lines[i]);
       i++;
