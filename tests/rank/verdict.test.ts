@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessJob, type VerdictInput } from "../../src/rank/verdict";
+import { assessJob, hardPreferenceConflict, type VerdictInput } from "../../src/rank/verdict";
 
 const NOW = new Date("2026-08-28T12:00:00Z");
 const base: VerdictInput = {
@@ -93,5 +93,50 @@ describe("assessJob", () => {
     expect(v.reasons[0]).toMatch(/Ouagadougou/);
     const r = assessJob({ ...base, job: { ...base.job, countries: [], location: "Remote", remote: true } });
     expect(r.verdict).toBe("apply");
+  });
+});
+
+describe("hardPreferenceConflict", () => {
+  const job = { remote: false, location: "Research Triangle Park, NC", companyName: "Cisco" };
+  const prefs = { remote: "any" as const, locations: ["Calgary, AB", "Remote"], excludedCompanies: [] };
+
+  it("flags an onsite posting outside every location the candidate named", () => {
+    const reason = hardPreferenceConflict({ job, prefs });
+    expect(reason).toMatch(/Research Triangle Park, NC/);
+    expect(reason).toMatch(/not one of your locations/);
+  });
+
+  it("is silent when the posting is in one of the candidate's locations", () => {
+    expect(hardPreferenceConflict({ job: { ...job, location: "Calgary, AB" }, prefs })).toBeNull();
+  });
+
+  it("is silent when remote and the candidate listed Remote", () => {
+    expect(hardPreferenceConflict({ job: { ...job, remote: true }, prefs })).toBeNull();
+  });
+
+  it("flags a remote-only candidate against an onsite posting", () => {
+    const reason = hardPreferenceConflict({ job, prefs: { ...prefs, remote: "remote" } });
+    expect(reason).toMatch(/only interested in remote/);
+  });
+
+  it("flags an onsite-only candidate against a remote posting", () => {
+    const reason = hardPreferenceConflict({ job: { ...job, remote: true }, prefs: { ...prefs, remote: "onsite" } });
+    expect(reason).toMatch(/only interested in onsite/);
+  });
+
+  it("flags an excluded company regardless of location", () => {
+    const reason = hardPreferenceConflict({
+      job: { ...job, location: "Calgary, AB" },
+      prefs: { ...prefs, excludedCompanies: ["cisco"] },
+    });
+    expect(reason).toMatch(/excluded-companies list/);
+  });
+
+  it("is silent when the candidate never set a locations preference", () => {
+    expect(hardPreferenceConflict({ job, prefs: { ...prefs, locations: [] } })).toBeNull();
+  });
+
+  it("is silent with no prefs on file at all", () => {
+    expect(hardPreferenceConflict({ job, prefs: null })).toBeNull();
   });
 });

@@ -36,6 +36,7 @@ import { getConfirmedFacts, getPrefs, type SearchPrefsRow } from "../profile/fac
 import { candidateConditions } from "./candidates";
 import { keywordScore } from "./keyword";
 import { roleTitlePatternSource } from "./role-titles";
+import { FIT_HARD_PREFERENCE_CAP, hardPreferenceConflict } from "./verdict";
 
 /** `job_scores.ranker_version` for the free, deterministic baseline. */
 export const KEYWORD_RANKER_VERSION = "keyword-v1";
@@ -336,18 +337,37 @@ export async function scoreFit(
     modelId,
   });
 
+  // fit.v1.md's own rule caps the score at 40 when the role contradicts a
+  // hard preference (excluded company, unusable location, ruled-out remote
+  // policy) — enforced here rather than trusted from the model, so the
+  // stored score can never contradict its own rationale/gaps the way a
+  // model-computed score can (see `hardPreferenceConflict`'s doc comment).
+  const conflict = hardPreferenceConflict({
+    job: { remote: job.remote, location: job.location, companyName: job.companyName },
+    prefs: prefsRow
+      ? {
+          remote: prefsRow.remote as "any" | "remote" | "hybrid" | "onsite",
+          locations: prefsRow.locations,
+          excludedCompanies: prefsRow.excludedCompanies,
+        }
+      : null,
+  });
+  const output: FitOutput = conflict
+    ? { ...fitResult.output, score: Math.min(fitResult.output.score, FIT_HARD_PREFERENCE_CAP) }
+    : fitResult.output;
+
   await upsertJobScore(db, {
     jobId: job.id,
     userId,
     rankerVersion: fitRankerVersion(modelId),
-    score: fitResult.output.score,
-    matched: fitResult.output.matched,
-    gaps: fitResult.output.gaps,
-    rationale: fitResult.output.rationale,
+    score: output.score,
+    matched: output.matched,
+    gaps: output.gaps,
+    rationale: output.rationale,
     generationId: fitResult.generationId,
   });
 
-  return { output: fitResult.output, generationId: fitResult.generationId, costUsd: fitResult.costUsd };
+  return { output, generationId: fitResult.generationId, costUsd: fitResult.costUsd };
 }
 
 export interface RankForUserOptions {

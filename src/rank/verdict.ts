@@ -119,3 +119,77 @@ export function assessJob(input: VerdictInput): VerdictResult {
 }
 
 export const VERDICT_LABEL: Record<Verdict, string> = { apply: "Worth applying", maybe: "Maybe", skip: "Skip" };
+
+/** `fit.v1.md`'s own scoring cap — see {@link hardPreferenceConflict}. */
+export const FIT_HARD_PREFERENCE_CAP = 40;
+
+export type HardPreferenceConflictInput = {
+  job: {
+    remote: boolean | null;
+    location: string | null;
+    companyName: string | null;
+  };
+  prefs: {
+    remote: "any" | "remote" | "hybrid" | "onsite" | null;
+    locations: string[] | null;
+    excludedCompanies: string[] | null;
+  } | null;
+};
+
+/**
+ * Deterministic re-check of fit.v1.md's own rule: "A role that contradicts a
+ * hard preference (excluded company, unusable location, remote policy the
+ * candidate ruled out) caps the score at 40." The prompt is asked to enforce
+ * this itself, but a prompt is not a guarantee — the model can (and did) hand
+ * back a high score next to a rationale describing exactly this kind of
+ * conflict. `scoreFit()` (`src/rank/rank.ts`) calls this after the model
+ * returns and clamps the *stored* score, rather than trusting the model's
+ * arithmetic — the same "verify after the fact" shape as
+ * `checkCitations()`/`stripUnsupportedBullets()` in
+ * `src/pipeline/hallucination.ts`.
+ *
+ * Deliberately narrower than this file's own hard-blocker list above: those
+ * (stale posting, already applied, seniority, country) are facts about the
+ * *job*, not a preference the candidate stated. And "onsite outside your
+ * cities" stays a soft, non-blocking *verdict* caveat below — a user's city
+ * list is advisory (`isPreferredLocation()` in `src/finders/filters.ts`) —
+ * but fit.v1.md counts "unusable location" as a hard preference for
+ * *scoring* purposes even when it is not severe enough to hide the posting
+ * from the list, so this checks it independently rather than reusing
+ * `assessJob`'s soft/hard split. Returns `null` when the candidate never
+ * named that preference at all (no `locations`, no `excludedCompanies`) —
+ * absence of a preference is not a contradiction of one.
+ */
+export function hardPreferenceConflict(input: HardPreferenceConflictInput): string | null {
+  const { job, prefs } = input;
+  if (!prefs) return null;
+
+  if (job.companyName) {
+    const excluded = (prefs.excludedCompanies ?? []).map((c) => c.toLowerCase().trim()).filter(Boolean);
+    if (excluded.includes(job.companyName.toLowerCase().trim())) {
+      return `${job.companyName} is on your excluded-companies list`;
+    }
+  }
+
+  if (prefs.remote === "remote" && job.remote === false) {
+    return "You're only interested in remote roles, and this one is onsite";
+  }
+  if (prefs.remote === "onsite" && job.remote === true) {
+    return "You're only interested in onsite roles, and this one is remote-only";
+  }
+
+  if (job.remote === false) {
+    const wanted = (prefs.locations ?? [])
+      .map((l) => l.toLowerCase().trim())
+      .filter((l) => l && l !== "remote");
+    if (wanted.length > 0) {
+      const norm = (job.location ?? "").toLowerCase();
+      const matches = wanted.some((w) => norm.includes(w.split(",")[0]));
+      if (!matches) {
+        return `Onsite in ${job.location ?? "an unlisted city"} — not one of your locations`;
+      }
+    }
+  }
+
+  return null;
+}

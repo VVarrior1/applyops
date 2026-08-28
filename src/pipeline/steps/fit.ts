@@ -98,13 +98,78 @@ export function buildFitPrompt(args: {
   ]);
 }
 
+// ---------------------------------------------------------------------------
+// Requirement check
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalise for a loose substring compare: lowercase, collapse whitespace,
+ * strip the punctuation a model tends to add/drop when "quoting" ("must have
+ * 3+ years" vs "3+ years of experience,"). Deliberately permissive — the goal
+ * is only to catch the failure this guards against (a candidate fact
+ * standing in for a requirement, e.g. "Python skill"), not to fail a
+ * requirement over a trimmed trailing period.
+ */
+function normalizeRequirementText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[.,;:!?"'()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Indexes of `output.matched` entries whose `requirement` cannot be traced
+ * back to anything `analyze` actually put in `analysis.requirements` — the
+ * failure mode fit.v1.md's rules now spell out explicitly but a prompt alone
+ * cannot guarantee (same reasoning as `checkCitations()` in
+ * `../hallucination.ts`, which verifies fact citations rather than
+ * requirement text — this checks a different field, so it lives here next to
+ * the step that produces it instead of in that shared module).
+ */
+export function invalidMatchIndexes(
+  output: FitOutput,
+  analysis: AnalyzeOutput,
+): number[] {
+  const posted = analysis.requirements.map((r) => normalizeRequirementText(r.text));
+  const invalid: number[] = [];
+  output.matched.forEach((match, i) => {
+    const claim = normalizeRequirementText(match.requirement);
+    const quoted = claim.length > 0 && posted.some((r) => r.includes(claim) || claim.includes(r));
+    if (!quoted) invalid.push(i);
+  });
+  return invalid;
+}
+
+/**
+ * `output` with every `matched` entry that isn't quoted from the posting's
+ * own requirements removed — what actually gets persisted and shown. Mirrors
+ * `stripUnsupportedBullets()`/`stripUnsupportedGuideClaims()`: the model's
+ * raw reply is still in `generations.output` for anyone who needs to see
+ * what it actually said, but nothing that fails this check reaches
+ * `job_scores` or the Fit tab.
+ */
+export function stripInventedMatches(
+  output: FitOutput,
+  analysis: AnalyzeOutput,
+): FitOutput {
+  const invalid = new Set(invalidMatchIndexes(output, analysis));
+  if (invalid.size === 0) return output;
+  return {
+    ...output,
+    matched: output.matched.filter((_, i) => !invalid.has(i)),
+  };
+}
+
 export async function runFit(
   db: Db,
   args: RunFitArgs,
 ): Promise<StepResult<FitOutput>> {
-  return runStep(db, "fit", {
+  const result = await runStep(db, "fit", {
     ...args,
     schema: FitOutput,
     prompt: buildFitPrompt(args),
   });
+
+  return { ...result, output: stripInventedMatches(result.output, args.analysis) };
 }

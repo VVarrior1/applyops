@@ -25,7 +25,8 @@ vi.mock("../../src/pipeline/steps", () => ({
 
 import { runFit } from "../../src/pipeline/steps";
 import { jobScores } from "../../src/db/schema";
-import { rankForUser } from "../../src/rank/rank";
+import { rankForUser, scoreFit } from "../../src/rank/rank";
+import type { SearchPrefsRow } from "../../src/profile/facts";
 
 const ANALYSIS: AnalyzeOutput = {
   requirements: [{ text: "3 years of Go", must_have: true }],
@@ -181,5 +182,65 @@ describe("rankForUser", () => {
     expect(result.skipped).toBe(1);
     expect(scoreInserts).toHaveLength(1);
     expect(scoreInserts[0].values).toMatchObject({ jobId: "j1", rankerVersion: "keyword-v1" });
+  });
+});
+
+const PREFS: SearchPrefsRow = {
+  userId: "user-1",
+  roles: null,
+  locations: ["Calgary, AB", "Remote"],
+  remote: "any",
+  seniority: null,
+  workAuth: "canada",
+  keywords: null,
+  excludedCompanies: [],
+  countries: ["CA", "US"],
+};
+
+describe("scoreFit", () => {
+  it("clamps a score above 40 to 40 when the posting is onsite outside the candidate's locations", async () => {
+    const { db } = fakeDb([]);
+    vi.mocked(runFit).mockResolvedValueOnce(fitStepResult("gen-1", 0.01));
+
+    const result = await scoreFit(
+      db,
+      "user-1",
+      { ...job("j1"), remote: false, location: "Research Triangle Park, NC" },
+      ANALYSIS,
+      { facts: [], prefs: PREFS },
+    );
+
+    expect(result.output.score).toBe(40);
+    // The rest of the model's output — matched/gaps/rationale — passes
+    // through untouched; only the number the model got wrong is corrected.
+    expect(result.output.matched).toEqual(FIT.matched);
+    expect(result.output.rationale).toBe(FIT.rationale);
+  });
+
+  it("never raises a score, only ever caps it", async () => {
+    const { db } = fakeDb([]);
+    vi.mocked(runFit).mockResolvedValueOnce({ ...fitStepResult("gen-1", 0.01), output: { ...FIT, score: 12 } });
+
+    const result = await scoreFit(
+      db,
+      "user-1",
+      { ...job("j1"), remote: false, location: "Research Triangle Park, NC" },
+      ANALYSIS,
+      { facts: [], prefs: PREFS },
+    );
+
+    expect(result.output.score).toBe(12);
+  });
+
+  it("leaves the score untouched when nothing conflicts with the candidate's preferences", async () => {
+    const { db } = fakeDb([]);
+    vi.mocked(runFit).mockResolvedValueOnce(fitStepResult("gen-1", 0.01));
+
+    const result = await scoreFit(db, "user-1", { ...job("j1"), remote: false, location: "Calgary, AB" }, ANALYSIS, {
+      facts: [],
+      prefs: PREFS,
+    });
+
+    expect(result.output.score).toBe(64);
   });
 });

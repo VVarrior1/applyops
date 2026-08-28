@@ -186,6 +186,45 @@ describe("runFit", () => {
 
     expect(sent()).toContain("no confirmed facts on file");
   });
+
+  it("strips a `matched` entry that restates a candidate fact instead of quoting a posting requirement", async () => {
+    const { db } = fakeDb();
+    const { model } = replyWith({
+      ...FIT,
+      matched: [
+        { requirement: "3 years of Go", fact_ids: ["F-001"] },
+        // Not in ANALYSIS.requirements at all — a candidate fact standing in
+        // for a requirement, the exact failure this guards against.
+        { requirement: "Python skill", fact_ids: ["F-002"] },
+      ],
+    });
+
+    const result = await runFit(db, {
+      analysis: ANALYSIS,
+      facts: FACTS,
+      userId: null,
+      _internal: { model },
+    });
+
+    expect(result.output.matched).toEqual([{ requirement: "3 years of Go", fact_ids: ["F-001"] }]);
+  });
+
+  it("keeps a matched requirement that only loosely quotes the posting text", async () => {
+    const { db } = fakeDb();
+    const { model } = replyWith({
+      ...FIT,
+      matched: [{ requirement: "3 years of Go.", fact_ids: ["F-001"] }],
+    });
+
+    const result = await runFit(db, {
+      analysis: ANALYSIS,
+      facts: FACTS,
+      userId: null,
+      _internal: { model },
+    });
+
+    expect(result.output.matched).toHaveLength(1);
+  });
 });
 
 describe("runTailor", () => {

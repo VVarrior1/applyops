@@ -5,6 +5,14 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { FitOutput } from "@/src/pipeline/schemas";
+import { FIT_APPLY_FROM, FIT_SKIP_BELOW } from "@/src/rank/verdict";
+
+/** How many `matched` cards render before "Show all" — same reasoning as the
+ * hard cap this guards against: a real fit rarely clears more than a
+ * handful of the posting's own must-haves, so a list this long is a signal
+ * something upstream (see `stripInventedMatches`) let through, not a wall
+ * the user should have to scroll past. */
+const MATCHED_PREVIEW_COUNT = 6;
 
 export interface FitTabProps {
   jobId: string;
@@ -38,9 +46,14 @@ function FactChips({ ids }: { ids: string[] }) {
   );
 }
 
+/**
+ * Same thresholds `assessJob()` (`src/rank/verdict.ts`) uses to turn this
+ * exact score into the "worth applying?" badge above the tabs — so the
+ * number here is never green while that badge reads "Maybe" or "Skip".
+ */
 function scoreTone(score: number): string {
-  if (score >= 70) return "text-emerald-600 dark:text-emerald-400";
-  if (score >= 40) return "text-amber-600 dark:text-amber-400";
+  if (score >= FIT_APPLY_FROM) return "text-emerald-600 dark:text-emerald-400";
+  if (score >= FIT_SKIP_BELOW) return "text-amber-600 dark:text-amber-400";
   return "text-destructive";
 }
 
@@ -59,6 +72,7 @@ export function FitTab({ jobId, initialAnalyzed, initialFit, initialKeywordScore
   const [fit, setFit] = useState<FitOutput | null>(initialFit);
   const [scoring, setScoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAllMatched, setShowAllMatched] = useState(false);
 
   async function handleScore() {
     setScoring(true);
@@ -76,6 +90,7 @@ export function FitTab({ jobId, initialAnalyzed, initialFit, initialKeywordScore
       }
       const body = (await fitRes.json()) as { output: FitOutput };
       setFit(body.output);
+      setShowAllMatched(false);
       // Refresh server props (plan point 2) — the page-level "worth
       // applying?" verdict badge depends on this job's fit score and only
       // updates via a server re-render.
@@ -118,15 +133,23 @@ export function FitTab({ jobId, initialAnalyzed, initialFit, initialKeywordScore
 
           {fit.matched.length > 0 && (
             <div className="flex flex-col gap-2">
-              <h3 className="text-sm font-semibold">Matched requirements</h3>
+              <h3 className="text-sm font-semibold">
+                Matched requirements
+                <span className="ml-1.5 font-normal text-muted-foreground">({fit.matched.length})</span>
+              </h3>
               <div className="flex flex-col gap-2">
-                {fit.matched.map((match, i) => (
+                {(showAllMatched ? fit.matched : fit.matched.slice(0, MATCHED_PREVIEW_COUNT)).map((match, i) => (
                   <div key={i} className="flex flex-col gap-1.5 rounded-lg border border-border bg-card p-2.5">
                     <p className="text-sm">{match.requirement}</p>
                     <FactChips ids={match.fact_ids} />
                   </div>
                 ))}
               </div>
+              {fit.matched.length > MATCHED_PREVIEW_COUNT && (
+                <Button variant="ghost" size="sm" className="w-fit" onClick={() => setShowAllMatched((v) => !v)}>
+                  {showAllMatched ? "Show fewer" : `Show all ${fit.matched.length}`}
+                </Button>
+              )}
             </div>
           )}
 
