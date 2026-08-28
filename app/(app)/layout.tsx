@@ -34,16 +34,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <header className="border-b bg-card">
-        <div className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-3">
-          <Link href="/settings" className="text-sm font-semibold tracking-tight">
+        <div className="mx-auto flex max-w-5xl items-center gap-4 px-4 py-3 sm:gap-6">
+          <Link href="/settings" className="shrink-0 text-sm font-semibold tracking-tight">
             ApplyOps
           </Link>
-          <nav className="flex flex-1 items-center gap-1 text-sm">
+          <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm">
             {NAV_ITEMS.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className="rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="shrink-0 rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 {item.label}
               </Link>
@@ -51,16 +51,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             {isOwner && (
               <Link
                 href="/evals"
-                className="rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="shrink-0 rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 Evals
               </Link>
             )}
           </nav>
-          <span className="hidden text-sm text-muted-foreground sm:inline">
+          <span className="hidden shrink-0 text-sm text-muted-foreground sm:inline">
             {user.email}
           </span>
-          <SignOutButton />
+          <div className="shrink-0">
+            <SignOutButton />
+          </div>
         </div>
       </header>
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-8">
