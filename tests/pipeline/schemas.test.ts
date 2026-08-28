@@ -45,6 +45,33 @@ describe("TailorOutput", () => {
     ]);
   });
 
+  it("accepts the base resume's skill categories", () => {
+    const withGroups = {
+      ...valid,
+      skill_groups: [
+        { label: "Languages", items: ["Python", "TypeScript/JavaScript"] },
+        { label: "Frameworks & Data", items: ["Next.js", "PostgreSQL"] },
+      ],
+    };
+    expect(TailorOutput.parse(withGroups)).toEqual(withGroups);
+  });
+
+  it("still parses a stored output written before `skill_groups` existed", () => {
+    // Every historical `tailor` generation is re-parsed by this schema on each
+    // PDF download; a required `skill_groups` would turn all of them into 400s.
+    const parsed = TailorOutput.parse(valid);
+    expect(parsed.skill_groups).toBeUndefined();
+  });
+
+  it("rejects a skill category with an empty label", () => {
+    const result = TailorOutput.safeParse({
+      ...valid,
+      skill_groups: [{ label: "", items: ["Python"] }],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0].path).toEqual(["skill_groups", 0, "label"]);
+  });
+
   it("accepts an empty fact_ids array (the hallucination checker flags it, not the schema)", () => {
     const bullet = { text: "Built a thing", fact_ids: [] };
     const parsed = TailorOutput.parse({

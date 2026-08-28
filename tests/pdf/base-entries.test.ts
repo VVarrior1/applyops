@@ -16,6 +16,11 @@ import { extraSections } from "@/src/pdf/ResumeDocument";
 import type { TailorOutput } from "@/src/pipeline/schemas";
 
 const BASE = readFileSync(path.resolve(__dirname, "fixtures/resume-base.tex"), "utf-8");
+/** The same base, but with skills grouped under the author's own headings. */
+const GROUPED_BASE = readFileSync(
+  path.resolve(__dirname, "fixtures/resume-base-grouped.tex"),
+  "utf-8",
+);
 
 function tailor(overrides: Partial<TailorOutput> = {}): TailorOutput {
   return {
@@ -353,6 +358,29 @@ describe("deriveExperienceFromSections", () => {
         [],
       ),
     ).toEqual([]);
+  });
+});
+
+describe("enrichTailorFromBase and the base's skill categories", () => {
+  it("fills skill_groups from the base so both renderers agree on the shape", () => {
+    const out = enrichTailorFromBase(tailor(), GROUPED_BASE);
+    expect(out.skill_groups?.map((g) => g.label)).toEqual([
+      "Languages",
+      "Frameworks & Data",
+      "Cloud & Infrastructure",
+      "AI/ML",
+    ]);
+  });
+
+  it("never overwrites categories the tailoring already has", () => {
+    const mine = [{ label: "Languages", items: ["Go"] }];
+    expect(enrichTailorFromBase(tailor({ skill_groups: mine }), GROUPED_BASE).skill_groups).toBe(
+      mine,
+    );
+  });
+
+  it("adds nothing for a v1 Proficient/Familiar base", () => {
+    expect(enrichTailorFromBase(tailor(), BASE).skill_groups).toBeUndefined();
   });
 });
 

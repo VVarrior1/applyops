@@ -6,6 +6,8 @@ import { jobs, jobScores } from "@/src/db/schema";
 import { LlmError } from "@/src/llm/model-id";
 import { runTailor } from "@/src/pipeline/steps";
 import type { FitOutput } from "@/src/pipeline/schemas";
+import { getLatexBase } from "@/src/pdf/resume-base";
+import { parseSkillGroups } from "@/src/pdf/skills-groups";
 import { getConfirmedFacts } from "@/src/profile/facts";
 
 /**
@@ -15,6 +17,13 @@ import { getConfirmedFacts } from "@/src/profile/facts";
  * their most recent `fit` score for this job, then returns the mechanical
  * hallucination report alongside the output so the tab can render blocked
  * bullets before anyone downloads a PDF.
+ *
+ * When the user has a LaTeX base resume, its Technical Skills categories are
+ * read off it and handed to the step, so the model tailors *inside* the
+ * candidate's own headings (Languages / Frameworks & Data / …) instead of
+ * returning a flat list that the splice would flatten into v1's
+ * Proficient/Familiar pair. A user with no base resume, or one whose skills
+ * block is written some other way, gets the old flat behaviour.
  */
 export async function POST(
   _request: Request,
@@ -68,11 +77,15 @@ export async function POST(
       }
     : null;
 
+  const base = await getLatexBase(db, user.id);
+  const skillGroups = base ? parseSkillGroups(base.latex) : [];
+
   try {
     const { output, generationId, hallucination, costUsd } = await runTailor(db, {
       analysis: job.analysis,
       facts,
       fit,
+      skillGroups,
       userId: user.id,
       jobId: job.id,
     });

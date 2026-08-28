@@ -185,6 +185,7 @@ export function register(program: Command): void {
           extra =
             `\nbase resume   ${base.id}` +
             `\nprojects from ${result.projectsSource}` +
+            `\nskills from   ${result.skillsSource}` +
             `\ntranscript    ${result.transcriptMerged ? "merged" : "not merged"}` +
             `\ntex           ${texPath}`;
         } else {

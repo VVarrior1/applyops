@@ -279,6 +279,27 @@ export type ResumeEntry = z.infer<typeof ResumeEntry>;
  * `sections` survives as the escape hatch for everything that is neither a job
  * nor a project (Leadership, Certifications, Publications) — and as the only
  * shape a pre-1.2.0 generation has.
+ *
+ * ### `skill_groups` — the base resume's own skill categories
+ *
+ * `skills` is one flat, ordered list, which is all v1's
+ * `\textbf{Proficient}{: …} \\ \textbf{Familiar}{: …}` skills block could
+ * take. The owner's current base resume instead groups skills under four
+ * hand-chosen headings (Languages / Frameworks & Data / Cloud & Infrastructure
+ * / AI-ML), and flattening them threw those headings away on every tailored
+ * PDF. `skill_groups` carries the categories through: the prompt lists the
+ * base's labels, the model may only reorder, trim or add *within* them, and
+ * `replaceSkillsSection()` (`src/pdf/latex.ts`) writes them back into the
+ * user's own `\textbf{Label}{: …}` lines.
+ *
+ * `.optional()` for the same reason as `experience`/`projects`: every stored
+ * `tailor` generation is re-parsed by this schema whenever its PDF is
+ * downloaded, and requiring a field invented today would turn every generation
+ * written before today into a 400. When it is absent the splice falls back to
+ * the flat `skills` path. `skills` itself stays required and is kept in sync —
+ * `runTailor()` overwrites it with the flattened `skill_groups` items — so
+ * every existing consumer (the react-pdf fallback, the Tailor tab, eval
+ * reporting) keeps working untouched.
  */
 export const TailorOutput = z.object({
   summary: z
@@ -288,6 +309,26 @@ export const TailorOutput = z.object({
   skills: z
     .array(z.string())
     .describe("6-10 skills, most relevant first; each backed by a fact."),
+  skill_groups: z
+    .array(
+      z.object({
+        label: z
+          .string()
+          .min(1)
+          .describe(
+            "A skill category label copied EXACTLY from the base resume's list. Never invent one.",
+          ),
+        items: z
+          .array(z.string())
+          .describe(
+            "The skills to print in this category, in the order a recruiter for this posting should read them.",
+          ),
+      }),
+    )
+    .describe(
+      "The base resume's own skill categories, re-ordered and trimmed for this posting. Same labels, same order, as supplied.",
+    )
+    .optional(),
   sections: z
     .array(
       z.object({
