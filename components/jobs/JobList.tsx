@@ -49,7 +49,7 @@ const WORK_AUTH_LABEL: Record<string, string> = {
  * request everything in one request. Bulk ranking has no such constraint —
  * that's `applyops rank --max`, run outside a request/response cycle.
  */
-const RANK_MORE_BATCH_SIZE = 5;
+const RANK_MORE_BATCH_SIZE = 10;
 
 async function parseErrorBody(res: Response): Promise<string> {
   try {
@@ -187,7 +187,7 @@ export function JobList({
           )}
         </p>
         <Button onClick={handleRankMore} disabled={ranking} size="sm">
-          {ranking ? "Ranking…" : "Rank more"}
+          {ranking ? "Scoring…" : "Score 10 newest (≈$0.02)"}
         </Button>
       </div>
       {status && <p className="text-sm text-muted-foreground">{status}</p>}

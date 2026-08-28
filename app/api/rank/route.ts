@@ -5,7 +5,7 @@ import { LlmError } from "@/src/llm/model-id";
 import { rankForUser } from "@/src/rank/rank";
 
 /** Hard ceiling on a single click's batch size — `applyops rank --max` has no such cap. */
-const MAX_JOBS_CEILING = 100;
+const MAX_JOBS_CEILING = 25;
 
 /**
  * Default batch size for this route specifically — deliberately smaller
@@ -17,7 +17,7 @@ const MAX_JOBS_CEILING = 100;
  * `maxDuration` below). The CLI has no such ceiling and keeps its own
  * larger default for bulk runs.
  */
-const ROUTE_DEFAULT_MAX_JOBS = 5;
+const ROUTE_DEFAULT_MAX_JOBS = 10;
 
 /**
  * Bounds how long this route is allowed to run (Vercel Node functions
