@@ -86,7 +86,7 @@ describe("greenhouse", () => {
     expect(ai).toBeDefined();
     expect(ai!.url).toContain("stripe.com/jobs");
     expect(ai!.location).toBe("Chicago");
-    expect(ai!.postedAt?.toISOString()).toBe("2026-08-26T15:09:59.000Z");
+    expect(ai!.postedAt?.toISOString()).toBe("2026-07-03T12:01:02.000Z"); // first_published, not updated_at
     // `content` arrives HTML-entity-encoded; it must come out as plain text.
     expect(ai!.description).not.toContain("&lt;");
     expect(ai!.description.length).toBeGreaterThan(200);
