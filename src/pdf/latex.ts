@@ -27,6 +27,10 @@
  *     `\resumeItemListStart` … `\resumeItemListEnd` block shape.
  *   - `pdflatex -interaction=nonstopmode`, run twice, 60 s each; a PDF that
  *     exists despite a non-zero exit is accepted (LaTeX warns constantly).
+ *     v2 adds `-no-shell-escape` and kpathsea's `openin_any`/`openout_any`
+ *     paranoid mode (see {@link latexEnv}) — v1 compiled only the owner's own
+ *     file on the owner's own laptop, whereas `resume_bases.latex` is
+ *     per-user content compiled on a server.
  *   - `gs -dBATCH -dNOPAUSE -q -sDEVICE=pdfwrite` to append the transcript.
  *
  * Adapted, because v2's tailored output has a different shape:
@@ -65,6 +69,18 @@ export const PDFLATEX_TIMEOUT_MS = 60_000;
 export const GHOSTSCRIPT_TIMEOUT_MS = 30_000;
 
 /**
+ * `stdout`/`stderr` ceiling for the `pdflatex` and `gs` children.
+ *
+ * Node's default is 1 MB, and `-interaction=nonstopmode` prints every error it
+ * recovers from — a document that has gone wrong can blow past that, at which
+ * point Node kills the child mid-pass. The `catch {}` around the call would
+ * then swallow the kill and the failure would resurface as a confusing
+ * `LatexCompileError`, or worse as a PDF from a half-finished pass. 10 MB is
+ * far more log than any resume can produce.
+ */
+export const SUBPROCESS_MAX_BUFFER = 10 * 1024 * 1024;
+
+/**
  * Directories prepended to `PATH` for the `pdflatex`/`gs` lookups.
  *
  * MacTeX installs `pdflatex` into `/Library/TeX/texbin`, which is added to an
@@ -84,13 +100,39 @@ export const LATEX_PATH_DIRS = [
   "/bin",
 ];
 
+/**
+ * The environment `pdflatex`/`gs` are spawned with.
+ *
+ * Two jobs. The `PATH` augmentation (see {@link LATEX_PATH_DIRS}) is why the
+ * binaries are findable at all from a server process. The three kpathsea
+ * variables are a sandbox: a base `.tex` is *user-supplied content*, and TeX
+ * is a programming language that can read and write files.
+ *
+ *   - `openin_any=p` — "paranoid" input: `\input`, `\openin` and friends may
+ *     only read below the current directory (the per-call `mkdtemp` dir) and
+ *     the TeX trees. `\input{/etc/passwd}` or `\input{/app/.env.local}` is
+ *     refused, so a base resume cannot exfiltrate a secret into the PDF the
+ *     caller downloads.
+ *   - `openout_any=p` — the same for writes, so a document cannot scribble
+ *     outside its temp directory.
+ *   - `shell_escape=f` — belt to `-no-shell-escape`'s braces: no `\write18`.
+ *
+ * These are read by kpathsea itself, so they bind every file access TeX makes,
+ * including ones made by a package the document `\usepackage`s.
+ */
 function latexEnv(): NodeJS.ProcessEnv {
   const existing = process.env.PATH ?? "";
   const parts = existing.split(path.delimiter).filter(Boolean);
   for (const dir of LATEX_PATH_DIRS) {
     if (!parts.includes(dir)) parts.push(dir);
   }
-  return { ...process.env, PATH: parts.join(path.delimiter) };
+  return {
+    ...process.env,
+    PATH: parts.join(path.delimiter),
+    openin_any: "p",
+    openout_any: "p",
+    shell_escape: "f",
+  };
 }
 
 /**
@@ -161,6 +203,65 @@ export async function isLatexAvailable(): Promise<boolean> {
 /** Test seam — forget the cached {@link isLatexAvailable} answer. */
 export function resetLatexAvailabilityCache(): void {
   latexAvailable = undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Base-resume validation (import time)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ceiling on an imported base resume, in characters.
+ *
+ * The owner's real `resume.tex` is 7,810 bytes; a Jake's-template resume with
+ * its whole preamble inlined is still well under this. The cap is here so a
+ * `resume_bases` row cannot become a way to hand `pdflatex` an arbitrarily
+ * large document to chew on for 60 s twice per download.
+ */
+export const MAX_BASE_LATEX_CHARS = 200_000;
+
+/**
+ * Constructs that make a `.tex` a file-read (or worse) primitive rather than a
+ * resume, checked at import time.
+ *
+ * {@link compileLatexToPdf} already runs with `-no-shell-escape` and
+ * kpathsea's paranoid `openin_any`/`openout_any` (see {@link latexEnv}),
+ * which is the control that actually holds. This is the second layer, and the
+ * one that gives a *readable error at import* rather than a base resume that
+ * mysteriously fails to compile months later. A real resume needs none of
+ * these: it has no `\write18`, and its `\input` (Jake's template has exactly
+ * one, `\input{glyphtounicode}`) names a file beside it, never an absolute
+ * path or `..`.
+ */
+const FORBIDDEN_LATEX: { pattern: RegExp; what: string }[] = [
+  { pattern: /\\write18\b/, what: "\\write18 (shell escape)" },
+  { pattern: /\\(openin|openout|read|write)\s*\d/, what: "\\openin / \\openout / \\read / \\write" },
+  {
+    // \input{/etc/passwd}, \include{../../.env.local}, \input /etc/passwd
+    pattern: /\\(input|include|InputIfFileExists|subfile)\s*\{?\s*(\/|~|\.\.)/,
+    what: "\\input / \\include of an absolute or parent-directory path",
+  },
+];
+
+/**
+ * Throws if `latex` is too big or contains a construct from
+ * {@link FORBIDDEN_LATEX}. Called by `applyops resume import-latex` before the
+ * `resume_bases` row is written, so a bad base never reaches the compiler.
+ */
+export function assertSafeBaseLatex(latex: string, source: string): void {
+  if (latex.length > MAX_BASE_LATEX_CHARS) {
+    throw new Error(
+      `${source} is ${latex.length} characters, over the ${MAX_BASE_LATEX_CHARS} limit for a base resume.`,
+    );
+  }
+  for (const { pattern, what } of FORBIDDEN_LATEX) {
+    if (pattern.test(latex)) {
+      throw new Error(
+        `${source} contains ${what}, which ApplyOps will not compile. ` +
+          "A base resume must be self-contained: no shell escape, no file I/O, " +
+          "no \\input of a path outside its own directory.",
+      );
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -280,7 +381,17 @@ export function replaceSkillsSection(
   const newSkillsContent = `\\textbf{Proficient}{: ${proficientTex}} \\\\
     \\textbf{Familiar}{: ${familiarTex}}`;
 
-  return content.replace(SKILLS_REGEX, `$1${newSkillsContent}$3`);
+  // The *function* form of `replace`, never a replacement string: a skill is
+  // free text from the tailor model, and "Raised $1M in seed funding" escapes
+  // to `Raised \$1M …`, whose `$1` a replacement string would expand into
+  // capture group 1 — the whole `%---TECHNICAL SKILLS---…\small{\item{`
+  // prefix. That corrupts the document silently (it still compiles), so the
+  // PDF route's fallback never fires and the user downloads a mangled resume.
+  return content.replace(
+    SKILLS_REGEX,
+    (_match, before: string, _body: string, after: string) =>
+      `${before}${newSkillsContent}${after}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -592,23 +703,36 @@ export type ProjectsSource =
  * Picks the base heading for a named project, so `\href` links and colours in
  * the user's own document survive tailoring. Falls back to v1's synthesised
  * `\textbf{name} $|$ \emph{technologies}` when the name is not in the base.
+ *
+ * `used` carries the base projects already claimed by an earlier project in
+ * the same render, and they are skipped. Without it the exact→substring→token
+ * fall-through lets two differently-named tailor projects ("CYD Soccer" and
+ * "CYD Soccer (Live at cydsoccer.com)") resolve to the *same* base heading,
+ * and the resume then lists one project twice under two different bullet
+ * sets — visibly wrong to a recruiter, and nothing downstream catches it.
+ * A tailor project whose only match is taken gets the synthesised heading,
+ * which at least says what it actually is.
  */
 function headingFor(
   name: string,
   technologies: string | undefined,
   baseProjects: readonly BaseProject[],
+  used: Set<BaseProject>,
 ): string {
+  const available = baseProjects.filter((p) => !used.has(p));
   const wanted = name.trim().toLowerCase();
-  const exact = baseProjects.find((p) => p.name.toLowerCase() === wanted);
+  const exact = available.find((p) => p.name.toLowerCase() === wanted);
   const partial =
     exact ??
-    baseProjects.find(
+    available.find(
       (p) => p.name.toLowerCase().includes(wanted) || wanted.includes(p.name.toLowerCase()),
     );
   const token =
-    partial ??
-    baseProjects.find((p) => nameTokens(p.name).some((t) => wanted.includes(t)));
-  if (token) return token.headingRaw;
+    partial ?? available.find((p) => nameTokens(p.name).some((t) => wanted.includes(t)));
+  if (token) {
+    used.add(token);
+    return token.headingRaw;
+  }
   return `\\textbf{${escapeLatex(name)}} $|$ \\emph{${escapeLatex(technologies ?? "")}}`;
 }
 
@@ -621,10 +745,13 @@ export function resolveProjects(
   baseProjects: readonly BaseProject[],
 ): { projects: ResolvedProject[]; source: ProjectsSource } {
   if (tailor.projects && tailor.projects.length > 0) {
+    // One base project may back at most one rendered project — see
+    // {@link headingFor}.
+    const used = new Set<BaseProject>();
     return {
       source: "tailor",
       projects: tailor.projects.map((project) => ({
-        headingRaw: headingFor(project.name, project.technologies, baseProjects),
+        headingRaw: headingFor(project.name, project.technologies, baseProjects, used),
         bullets: project.bullets.map((b) => b.text).slice(0, MAX_BULLETS_PER_PROJECT),
       })),
     };
@@ -660,11 +787,20 @@ export interface LatexContact {
 export function fillContactPlaceholders(content: string, contact?: LatexContact): string {
   if (!contact) return content;
   const links = (contact.links ?? []).filter(Boolean);
+  // `() => value` rather than a replacement string, for the same reason
+  // {@link replaceSkillsSection} uses one: `escapeLatex` emits `\$`, and `$&`
+  // / `` $` `` / `$'` / `$1` in a *replacement string* are substitution
+  // patterns, so a name or link containing `$` would silently splice the
+  // surrounding document into itself.
+  const literal = (value: string) => () => value;
   return content
-    .replace(/\{\{NAME\}\}/g, escapeLatex(contact.name ?? ""))
-    .replace(/\{\{EMAIL\}\}/g, escapeLatex(contact.email ?? ""))
-    .replace(/\{\{PHONE\}\}/g, escapeLatex(contact.phone ?? ""))
-    .replace(/\{\{LINKS\}\}/g, links.map((l) => escapeLatex(l)).join(" $|$ "));
+    .replace(/\{\{NAME\}\}/g, literal(escapeLatex(contact.name ?? "")))
+    .replace(/\{\{EMAIL\}\}/g, literal(escapeLatex(contact.email ?? "")))
+    .replace(/\{\{PHONE\}\}/g, literal(escapeLatex(contact.phone ?? "")))
+    .replace(
+      /\{\{LINKS\}\}/g,
+      literal(links.map((l) => escapeLatex(l)).join(" $|$ ")),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -729,11 +865,16 @@ export async function compileLatexToPdf(
     // did the same. Both passes are allowed to "fail"; the PDF is the verdict.
     for (let pass = 0; pass < 2; pass++) {
       try {
-        await execFileAsync(pdflatexBin(), ["-interaction=nonstopmode", `${base}.tex`], {
-          cwd: dir,
-          env: latexEnv(),
-          timeout: options.timeoutMs ?? PDFLATEX_TIMEOUT_MS,
-        });
+        await execFileAsync(
+          pdflatexBin(),
+          ["-no-shell-escape", "-interaction=nonstopmode", `${base}.tex`],
+          {
+            cwd: dir,
+            env: latexEnv(),
+            timeout: options.timeoutMs ?? PDFLATEX_TIMEOUT_MS,
+            maxBuffer: SUBPROCESS_MAX_BUFFER,
+          },
+        );
       } catch {
         // Swallowed on purpose — checked below by looking for the PDF.
       }
@@ -790,7 +931,11 @@ export async function mergeWithTranscript(
         resumePath,
         transcriptPath,
       ],
-      { env: latexEnv(), timeout: GHOSTSCRIPT_TIMEOUT_MS },
+      {
+        env: latexEnv(),
+        timeout: GHOSTSCRIPT_TIMEOUT_MS,
+        maxBuffer: SUBPROCESS_MAX_BUFFER,
+      },
     );
     const merged = await readFile(outPath);
     return { pdf: merged, merged: true };

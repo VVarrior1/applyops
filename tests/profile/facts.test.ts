@@ -8,6 +8,7 @@ import {
   outcomeEvents,
   profileFacts,
   profiles,
+  resumeBases,
   searchPrefs,
   usageDaily,
 } from "../../src/db/schema";
@@ -337,6 +338,7 @@ function fakeDeleteDb(seed: {
     [jobs, "jobs"],
     [profileFacts, "profile_facts"],
     [searchPrefs, "search_prefs"],
+    [resumeBases, "resume_bases"],
     [profiles, "profiles"],
   ]);
 
@@ -409,6 +411,7 @@ describe("deleteUserData", () => {
       "delete:generations",
       "delete:profile_facts",
       "delete:search_prefs",
+      "delete:resume_bases",
       "delete:profiles",
     ]);
     expect(storageLog).toEqual(["storage:deleteAll"]);
@@ -425,6 +428,7 @@ describe("deleteUserData", () => {
       "delete:generations",
       "delete:profile_facts",
       "delete:search_prefs",
+      "delete:resume_bases",
       "delete:profiles",
     ]);
   });
@@ -461,5 +465,20 @@ describe("deleteUserData", () => {
 
     expect(storageLog).toEqual(["storage:deleteAll"]);
     expect(log).toContain("delete:profiles");
+  });
+
+  /**
+   * `resume_bases` holds the user's whole real `.tex` — name, phone, email,
+   * every employer. The FK to `profiles` does cascade it away today, but
+   * "Delete my data" deletes every other per-user table by name and this one
+   * must not be the exception a future refactor silently drops.
+   */
+  it("deletes the user's base resume explicitly, before the profiles row it cascades from", async () => {
+    const { db, log } = fakeDeleteDb({ applicationRows: [], generationRows: [] });
+
+    await deleteUserData(db, "user-1", { _internal: { deleteResumeObjects: async () => {} } });
+
+    expect(log).toContain("delete:resume_bases");
+    expect(log.indexOf("delete:resume_bases")).toBeLessThan(log.indexOf("delete:profiles"));
   });
 });

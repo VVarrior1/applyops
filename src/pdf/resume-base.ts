@@ -8,7 +8,7 @@
  * a user with no base resume simply keeps getting react-pdf output.
  */
 
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { resumeBases } from "../db/schema";
 import {
@@ -34,21 +34,30 @@ export interface LatexBaseRow {
  * every caller's answer to that is "use the react-pdf renderer instead".
  */
 export async function getLatexBase(db: Db, userId: string): Promise<LatexBaseRow | null> {
-  const rows = await db
+  // Every condition is in SQL, and the limit is 1. Filtering `kind` in
+  // JavaScript over the newest N rows would silently return `null` — falling
+  // back to react-pdf, the exact regression this module exists to prevent —
+  // for a user who happens to have N newer rows of another kind.
+  const [row] = await db
     .select({
       id: resumeBases.id,
       latex: resumeBases.latex,
       transcriptPdfPath: resumeBases.transcriptPdfPath,
       createdAt: resumeBases.createdAt,
-      kind: resumeBases.kind,
     })
     .from(resumeBases)
-    .where(eq(resumeBases.userId, userId))
+    .where(
+      and(
+        eq(resumeBases.userId, userId),
+        eq(resumeBases.kind, "latex"),
+        isNotNull(resumeBases.latex),
+        ne(resumeBases.latex, ""),
+      ),
+    )
     .orderBy(desc(resumeBases.createdAt))
-    .limit(10);
+    .limit(1);
 
-  const row = rows.find((r) => r.kind === "latex" && !!r.latex?.trim());
-  if (!row || !row.latex) return null;
+  if (!row?.latex?.trim()) return null;
   return {
     id: row.id,
     latex: row.latex,

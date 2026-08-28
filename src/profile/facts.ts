@@ -21,6 +21,7 @@ import {
   outcomeEvents,
   profileFacts,
   profiles,
+  resumeBases,
   searchPrefs,
   usageDaily,
 } from "../db/schema";
@@ -389,7 +390,9 @@ export interface DeleteUserDataOptions {
  *      never be referenced there in practice — worth re-checking once
  *      Task 11 exists.
  *   5. `generations`
- *   6. `profile_facts`, `search_prefs`
+ *   6. `profile_facts`, `search_prefs`, `resume_bases` (the user's real
+ *      `.tex` resume — name, phone, email, employers — so it goes explicitly
+ *      rather than only via the FK cascade below)
  *   7. `profiles` itself (the identity row — every FK above points at it)
  *
  * Does NOT delete the underlying Supabase Auth user: signing back in after
@@ -436,6 +439,11 @@ export async function deleteUserData(
 
     await tx.delete(profileFacts).where(eq(profileFacts.userId, userId));
     await tx.delete(searchPrefs).where(eq(searchPrefs.userId, userId));
+    // `resume_bases` would also go via its ON DELETE CASCADE to `profiles`,
+    // but every other per-user table is deleted by name here and this one
+    // holds the user's entire real resume. Explicit means a future refactor
+    // that reorders or stops deleting `profiles` cannot silently leave it.
+    await tx.delete(resumeBases).where(eq(resumeBases.userId, userId));
     await tx.delete(profiles).where(eq(profiles.userId, userId));
   });
 }

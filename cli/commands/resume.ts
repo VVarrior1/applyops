@@ -19,6 +19,7 @@ import {
   PROJECTS_END_REGEX,
   PROJECTS_START_REGEX,
   SKILLS_REGEX,
+  assertSafeBaseLatex,
   extractBaseProjects,
 } from "../../src/pdf/latex";
 import { insertLatexBase, uploadTranscript } from "../../src/pdf/resume-base";
@@ -55,6 +56,8 @@ export function register(program: Command): void {
           `${absoluteTex} has no \\documentclass — that is not a compilable LaTeX document.`,
         );
       }
+
+      assertSafeBaseLatex(latex, absoluteTex);
 
       // Warn rather than refuse: a base with no matching blocks still renders
       // (the splice leaves the document alone), it just will not be tailored.

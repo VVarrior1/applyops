@@ -1,10 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_FAMILIAR_SKILLS,
+  MAX_BASE_LATEX_CHARS,
+  assertSafeBaseLatex,
+  fillContactPlaceholders,
   PROJECTS_END_REGEX,
   PROJECTS_START_REGEX,
   SKILLS_REGEX,
@@ -385,5 +389,171 @@ describe("renderLatexResume (real pdflatex)", () => {
     expect(text).toContain("Jane Q. Doe");
     expect(text).toContain("Built a Kanban app with role-based access control.");
     expect(text).not.toContain("Pandas");
+  }, 180_000);
+});
+
+/**
+ * Regression: `String.prototype.replace` with a *string* second argument
+ * treats `$1`, `$&`, `` $` `` and `$'` as substitution patterns. `escapeLatex`
+ * turns a perfectly ordinary resume line — "Raised $1M in seed funding" — into
+ * `Raised \$1M …`, so a replacement string would splice capture group 1 (the
+ * whole `%---TECHNICAL SKILLS---…\small{\item{` prefix) into the middle of the
+ * skills line. It still *compiles*, so nothing downstream notices and the user
+ * downloads a resume with two Technical Skills headings in it.
+ */
+describe("a `$` in tailored content is never a replacement pattern", () => {
+  it("keeps a dollar figure in a skill verbatim, as `\\$1`", () => {
+    const out = replaceSkillsSection(BASE, ["Raised $1M in seed funding", "TypeScript"]);
+    expect(out).toContain(
+      "\\textbf{Proficient}{: Raised \\$1M in seed funding, TypeScript}",
+    );
+    // The tell-tale of the bug: the banner comment duplicated into the body.
+    expect(out.match(/\\section\{Technical Skills\}/g)).toHaveLength(1);
+    expect(out.match(/%-----------TECHNICAL SKILLS-----------/g)).toHaveLength(1);
+    // The prefix `$1` would have expanded to starts with the banner comment;
+    // the Proficient line must contain no LaTeX-source spill at all.
+    const proficient = out.match(/\\textbf\{Proficient\}\{:([^}]*)\}/)?.[1] ?? "";
+    expect(proficient).not.toContain("TECHNICAL SKILLS");
+    expect(proficient).not.toContain("\\begin{itemize}");
+  });
+
+  it("survives every replacement-pattern token a skill could contain", () => {
+    const out = replaceSkillsSection(BASE, ["A $& B $` C $' D $2 E"]);
+    // `&` is escaped by escapeLatex too, hence `\$\&`.
+    expect(out).toContain("\\textbf{Proficient}{: A \\$\\& B \\$` C \\$' D \\$2 E}");
+    expect(out.match(/\\section\{Technical Skills\}/g)).toHaveLength(1);
+  });
+
+  it("keeps a `$` in a contact placeholder value verbatim", () => {
+    const templated = "\\documentclass{article}\n{{NAME}} / {{EMAIL}} / {{LINKS}}\n";
+    const out = fillContactPlaceholders(templated, {
+      name: "A$1B",
+      email: "x$&y@example.org",
+      links: ["ex$`ample.org"],
+    });
+    expect(out).toContain("A\\$1B / x\\$\\&y@example.org / ex\\$`ample.org");
+    expect(out).not.toContain("{{");
+  });
+});
+
+describe("headingFor never reuses one base project for two tailored ones", () => {
+  /**
+   * `headingFor` falls through exact → substring → token match, so two
+   * differently-worded tailor projects can land on the same base project.
+   * Before the `used` set, both got the base's `headingRaw` and the resume
+   * listed one project twice under two different bullet sets.
+   */
+  it("gives the second fuzzy match a synthesised heading instead of a duplicate", () => {
+    const { tex } = spliceTailoredResume(BASE, {
+      ...TAILOR,
+      projects: [
+        {
+          name: "TaskBoard",
+          technologies: "Next.js, Prisma",
+          bullets: [{ text: "Built the board.", fact_ids: ["F-002"] }],
+        },
+        {
+          name: "TaskBoard – Full-Stack KanBan App",
+          technologies: "Docker",
+          bullets: [{ text: "Added drag and drop.", fact_ids: ["F-007"] }],
+        },
+      ],
+    });
+
+    // Two projects emitted (`\item \resumeProjectHeading`; the bare
+    // `\resumeProjectHeading` in the preamble is its \newcommand definition)…
+    expect(tex.match(/\\item \\resumeProjectHeading/g)).toHaveLength(2);
+    // …and the base's own heading is used by exactly one of them.
+    expect(
+      tex.match(/\{\\textbf\{TaskBoard – Full-Stack KanBan App\} \$\|\$ \\emph\{Next\.js, Prisma, SQL/g),
+    ).toHaveLength(1);
+    // The loser falls back to v1's synthesised form — it names itself
+    // honestly rather than repeating the first project's heading.
+    expect(tex).toContain("{\\textbf{TaskBoard – Full-Stack KanBan App} $|$ \\emph{Docker}}{}");
+    expect(tex).toContain("\\resumeItem{Built the board.}");
+    expect(tex).toContain("\\resumeItem{Added drag and drop.}");
+  });
+});
+
+describe("assertSafeBaseLatex", () => {
+  it("accepts the fixture — a real Jake's-template resume, `\\input{glyphtounicode}` and all", () => {
+    expect(() => assertSafeBaseLatex(BASE, "fixture.tex")).not.toThrow();
+    expect(BASE).toContain("\\input{glyphtounicode}");
+  });
+
+  it("rejects \\write18", () => {
+    expect(() =>
+      assertSafeBaseLatex(`${BASE}\n\\immediate\\write18{touch /tmp/pwned}`, "x.tex"),
+    ).toThrow(/write18/);
+  });
+
+  it("rejects \\input of an absolute or parent-directory path", () => {
+    expect(() => assertSafeBaseLatex("\\input{/etc/passwd}", "x.tex")).toThrow(/input/);
+    expect(() => assertSafeBaseLatex("\\include{../../.env.local}", "x.tex")).toThrow(/input/);
+    expect(() => assertSafeBaseLatex("\\input {~/.ssh/id_rsa}", "x.tex")).toThrow(/input/);
+  });
+
+  it("rejects \\openin / \\read", () => {
+    expect(() => assertSafeBaseLatex("\\openin1=/etc/passwd", "x.tex")).toThrow(/openin/);
+    expect(() => assertSafeBaseLatex("\\read 0 to \\line", "x.tex")).toThrow(/openin/);
+  });
+
+  it("rejects a base past the size cap", () => {
+    expect(() => assertSafeBaseLatex("x".repeat(MAX_BASE_LATEX_CHARS + 1), "x.tex")).toThrow(
+      /over the/,
+    );
+    expect(() => assertSafeBaseLatex("x".repeat(MAX_BASE_LATEX_CHARS), "x.tex")).not.toThrow();
+  });
+});
+
+/**
+ * The other half of the file-read defence: even if a base with `\input{/abs}`
+ * somehow reaches the compiler (an older row, a future upload path that
+ * forgets {@link assertSafeBaseLatex}), kpathsea's paranoid `openin_any`
+ * must refuse the read so the secret never lands in the PDF.
+ */
+describe("compileLatexToPdf sandbox (real pdflatex)", () => {
+  it("does not leak a file \\input from an absolute path", async ({ skip }) => {
+    if (!(await isLatexAvailable())) {
+      skip();
+      return;
+    }
+
+    const dir = mkdtempSync(path.join(os.tmpdir(), "applyops-leak-test-"));
+    const secretPath = path.join(dir, "fakesecret.txt");
+    const secret = "SECRETVALUE-ABC123-LEAKED";
+    writeFileSync(secretPath, `${secret}\n`, "utf-8");
+
+    try {
+      const hostile = BASE.replace(
+        "\\begin{document}",
+        `\\begin{document}\n\\input{${secretPath}}`,
+      );
+
+      let pdf: Buffer | null = null;
+      try {
+        pdf = (await renderLatexResume({ base: { latex: hostile }, tailor: TAILOR })).pdf;
+      } catch {
+        return; // refusing to compile at all is also a pass
+      }
+
+      let text: string;
+      try {
+        text = execFileSync("pdftotext", ["-", "-"], {
+          input: pdf,
+          encoding: "utf-8",
+          maxBuffer: 8 * 1024 * 1024,
+        });
+      } catch {
+        // No poppler: fall back to scanning the raw bytes, which catches an
+        // uncompressed leak and is better than asserting nothing.
+        expect(pdf.toString("latin1")).not.toContain(secret);
+        return;
+      }
+      expect(text).not.toContain(secret);
+      expect(text).not.toContain("ABC123");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }, 180_000);
 });
