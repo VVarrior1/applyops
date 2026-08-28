@@ -35,7 +35,7 @@ export type CompanyCandidate = {
   atsVendor: AtsVendor;
   atsSlug: string | null;
   careersUrl: string | null;
-  source: "v1_allowlist" | "openjobs" | "manual";
+  source: "v1_allowlist" | "openjobs" | "manual" | "canada_curated";
 };
 
 export type ImportResult = {
@@ -307,6 +307,24 @@ export async function importOpenJobs(
 // ---------------------------------------------------------------------------
 // Merge
 // ---------------------------------------------------------------------------
+
+/**
+ * Read-only lookup of every `(vendor, slug)` pair already in `companies`, as
+ * `"vendor:slug.lower()"` keys. Lets a caller report "already present" vs.
+ * "new" (e.g. `companies discover-canada --dry-run`) without writing
+ * anything — `upsertCompanies` computes the same set internally, but only as
+ * a side effect of an insert.
+ */
+export async function existingVendorSlugKeys(db: Db): Promise<Set<string>> {
+  const rows = await db
+    .select({ atsVendor: companies.atsVendor, atsSlug: companies.atsSlug })
+    .from(companies);
+  const keys = new Set<string>();
+  for (const row of rows) {
+    if (row.atsSlug) keys.add(`${row.atsVendor}:${row.atsSlug.toLowerCase()}`);
+  }
+  return keys;
+}
 
 /** First candidate wins per `(vendor, lower(slug))`. */
 function dedupeCandidates(candidates: CompanyCandidate[]): CompanyCandidate[] {
