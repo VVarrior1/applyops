@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import { getDb } from "@/src/db/client";
 import { loadPublicResults, type BenchmarkHeadline, type EvalScorecard, type GateStatus } from "@/src/funnel/public-results";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +18,23 @@ export const metadata: Metadata = {
   title: "Results",
 };
 
-export const revalidate = 300;
+/**
+ * How long the `loadPublicResults` query is cached, in Next's data cache.
+ * This route can no longer be prerendered/ISR — `app/(public)/layout.tsx`
+ * reads the session via `getOptionalUser()` (to decide "Sign in" vs. "Back
+ * to Jobs"), which forces every route under `app/(public)/**` dynamic — so
+ * `export const revalidate` here would be dead config; the `unstable_cache`
+ * wrap below (mirroring `getBoard()` in `app/(public)/benchmark/page.tsx`)
+ * is what keeps a per-request Postgres round trip from being paid on every
+ * anonymous hit instead.
+ */
+const RESULTS_CACHE_SECONDS = 300;
+
+const getResults = unstable_cache(
+  async () => loadPublicResults(getDb()),
+  ["public-results-board", "page"],
+  { revalidate: RESULTS_CACHE_SECONDS, tags: ["public-results-board"] },
+);
 
 function pct(n: number | null): string {
   return n == null ? "—" : `${(n * 100).toFixed(1)}%`;
@@ -202,13 +219,15 @@ function stageLabel(stage: string): string {
 
 export default async function PublicResultsPage() {
   // `DATABASE_URL` is absent during CI's env-stripped `npm run build` (see
-  // .github/workflows/ci.yml) and this route is statically prerendered (ISR,
-  // `revalidate` above) — `getDb()` throws synchronously without a URL, which
-  // would fail the whole build. Skip the query when there's no database to
-  // reach; the page already renders a correct "No results yet" empty state
-  // for `data === null`, and the 300s revalidate refills it from the first
-  // real request once deployed with real env vars.
-  const data = process.env.DATABASE_URL ? await loadPublicResults(getDb()) : null;
+  // .github/workflows/ci.yml) — `getDb()` throws synchronously without a
+  // URL, which would fail the whole build. This route renders per request
+  // (see the comment on `RESULTS_CACHE_SECONDS` above for why), so this
+  // guard only matters at build time, when Next still executes the page
+  // once to type-check/collect it; skip the query when there's no database
+  // to reach. The page already renders a correct "No results yet" empty
+  // state for `data === null`, and the cache refills it from the first real
+  // request once deployed with real env vars.
+  const data = process.env.DATABASE_URL ? await getResults() : null;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -327,8 +346,8 @@ export default async function PublicResultsPage() {
             </section>
 
             <p className="text-xs text-muted-foreground">
-              Generated {date(data.generatedAt)}. Numbers are derived live from the database on every
-              request (cached up to 5 minutes) — nothing here is hand-picked.
+              Generated {date(data.generatedAt)}. Numbers are derived from the database and cached for
+              up to 5 minutes — nothing here is hand-picked.
             </p>
           </>
         )}

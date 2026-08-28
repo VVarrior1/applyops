@@ -26,30 +26,32 @@ export default async function PublicLayout({ children }: { children: React.React
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <header className="border-b bg-card">
-        <div className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-3">
+        <div className="mx-auto flex max-w-5xl items-center gap-4 px-4 py-3 sm:gap-6">
           <Link href="/" className="shrink-0 text-sm font-semibold tracking-tight">
             ApplyOps
           </Link>
-          <nav className="flex flex-1 items-center gap-1 text-sm">
+          <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm">
             {NAV_ITEMS.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className="rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="shrink-0 rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 {item.label}
               </Link>
             ))}
           </nav>
-          {user ? (
-            <Link href="/jobs" className={buttonVariants({ size: "sm", variant: "outline" })}>
-              Back to Jobs
-            </Link>
-          ) : (
-            <Link href="/login" className={buttonVariants({ size: "sm", variant: "outline" })}>
-              Sign in
-            </Link>
-          )}
+          <div className="shrink-0">
+            {user ? (
+              <Link href="/jobs" className={buttonVariants({ size: "sm", variant: "outline" })}>
+                Back to Jobs
+              </Link>
+            ) : (
+              <Link href="/login" className={buttonVariants({ size: "sm", variant: "outline" })}>
+                Sign in
+              </Link>
+            )}
+          </div>
         </div>
       </header>
       <div className="flex flex-1 flex-col">{children}</div>
