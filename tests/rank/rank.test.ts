@@ -45,7 +45,7 @@ const FIT: FitOutput = {
   rationale: "Strong payments signal, no infra work.",
 };
 
-/** Minimal, valid `StepResult<FitOutput>` — usage/latency are unused by `rankForUser`. */
+/** Minimal, valid `FitStepResult` — usage/latency/strippedMatchCount are unused by `rankForUser`. */
 function fitStepResult(generationId: string, costUsd: number) {
   return {
     output: FIT,
@@ -53,6 +53,7 @@ function fitStepResult(generationId: string, costUsd: number) {
     usage: { inputTokens: 100, outputTokens: 50 },
     costUsd,
     latencyMs: 10,
+    strippedMatchCount: 0,
   };
 }
 
@@ -197,8 +198,11 @@ const PREFS: SearchPrefsRow = {
   countries: ["CA", "US"],
 };
 
+/** Same as {@link PREFS}, but the candidate stated they must be onsite — the only case in which a bare location mismatch is a hard-preference conflict (`hardPreferenceConflict`'s doc comment in `src/rank/verdict.ts`). */
+const ONSITE_PREFS: SearchPrefsRow = { ...PREFS, remote: "onsite" };
+
 describe("scoreFit", () => {
-  it("clamps a score above 40 to 40 when the posting is onsite outside the candidate's locations", async () => {
+  it("clamps a score above 40 to 40 when the posting is onsite outside the candidate's locations and they said onsite only", async () => {
     const { db } = fakeDb([]);
     vi.mocked(runFit).mockResolvedValueOnce(fitStepResult("gen-1", 0.01));
 
@@ -207,14 +211,53 @@ describe("scoreFit", () => {
       "user-1",
       { ...job("j1"), remote: false, location: "Research Triangle Park, NC" },
       ANALYSIS,
-      { facts: [], prefs: PREFS },
+      { facts: [], prefs: ONSITE_PREFS },
     );
 
     expect(result.output.score).toBe(40);
-    // The rest of the model's output — matched/gaps/rationale — passes
-    // through untouched; only the number the model got wrong is corrected.
+    // The rest of the model's output — matched/rationale — passes through
+    // untouched; only the number the model got wrong is corrected. `gaps`
+    // gains the conflict reason (see the dedicated test below) but keeps
+    // everything the model already put there.
     expect(result.output.matched).toEqual(FIT.matched);
     expect(result.output.rationale).toBe(FIT.rationale);
+  });
+
+  it("prepends the conflict reason to gaps so the clamped score carries its own explanation", async () => {
+    const { db } = fakeDb([]);
+    vi.mocked(runFit).mockResolvedValueOnce(fitStepResult("gen-1", 0.01));
+
+    const result = await scoreFit(
+      db,
+      "user-1",
+      { ...job("j1"), remote: false, location: "Research Triangle Park, NC" },
+      ANALYSIS,
+      { facts: [], prefs: ONSITE_PREFS },
+    );
+
+    expect(result.output.gaps[0]).toMatch(/Research Triangle Park, NC/);
+    expect(result.output.gaps[0]).toMatch(/not one of your locations/);
+    // The model's own gaps still follow, untouched.
+    expect(result.output.gaps.slice(1)).toEqual(FIT.gaps);
+  });
+
+  it("does not clamp an onsite posting outside the candidate's locations when they left remote open (remote: any)", async () => {
+    const { db } = fakeDb([]);
+    vi.mocked(runFit).mockResolvedValueOnce(fitStepResult("gen-1", 0.01));
+
+    // Same job as the clamp test above, but under `PREFS` (`remote: "any"`)
+    // instead of `ONSITE_PREFS` — a bare city list is advisory, not a
+    // stated hard preference, when the candidate never ruled out remote.
+    const result = await scoreFit(
+      db,
+      "user-1",
+      { ...job("j1"), remote: false, location: "Research Triangle Park, NC" },
+      ANALYSIS,
+      { facts: [], prefs: PREFS },
+    );
+
+    expect(result.output.score).toBe(64);
+    expect(result.output.gaps).toEqual(FIT.gaps);
   });
 
   it("never raises a score, only ever caps it", async () => {
@@ -226,7 +269,7 @@ describe("scoreFit", () => {
       "user-1",
       { ...job("j1"), remote: false, location: "Research Triangle Park, NC" },
       ANALYSIS,
-      { facts: [], prefs: PREFS },
+      { facts: [], prefs: ONSITE_PREFS },
     );
 
     expect(result.output.score).toBe(12);
@@ -238,7 +281,7 @@ describe("scoreFit", () => {
 
     const result = await scoreFit(db, "user-1", { ...job("j1"), remote: false, location: "Calgary, AB" }, ANALYSIS, {
       facts: [],
-      prefs: PREFS,
+      prefs: ONSITE_PREFS,
     });
 
     expect(result.output.score).toBe(64);

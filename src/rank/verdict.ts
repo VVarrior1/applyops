@@ -159,6 +159,17 @@ export type HardPreferenceConflictInput = {
  * `assessJob`'s soft/hard split. Returns `null` when the candidate never
  * named that preference at all (no `locations`, no `excludedCompanies`) —
  * absence of a preference is not a contradiction of one.
+ *
+ * The location branch only fires for a candidate who said `remote:
+ * "onsite"` — i.e. stated they must physically be somewhere, so a city
+ * list is no longer advisory but an actual constraint. `remote: "any"`
+ * (the common case) rules nothing out, so a bare city list can't
+ * contradict it: measured against the owner's real `search_prefs`
+ * (`remote: "any"`) over the live job pool, treating the list as a hard
+ * cap here clamped 4,773 of 6,000 active jobs to the same score and
+ * flattened `/jobs`' "sorted by fit" into "sorted by posted date" for most
+ * of the pool. Also requires `job.location` to be non-null — an unknown
+ * location is not a contradicted preference.
  */
 export function hardPreferenceConflict(input: HardPreferenceConflictInput): string | null {
   const { job, prefs } = input;
@@ -178,15 +189,15 @@ export function hardPreferenceConflict(input: HardPreferenceConflictInput): stri
     return "You're only interested in onsite roles, and this one is remote-only";
   }
 
-  if (job.remote === false) {
+  if (job.remote === false && prefs.remote === "onsite" && job.location) {
     const wanted = (prefs.locations ?? [])
       .map((l) => l.toLowerCase().trim())
       .filter((l) => l && l !== "remote");
     if (wanted.length > 0) {
-      const norm = (job.location ?? "").toLowerCase();
+      const norm = job.location.toLowerCase();
       const matches = wanted.some((w) => norm.includes(w.split(",")[0]));
       if (!matches) {
-        return `Onsite in ${job.location ?? "an unlisted city"} — not one of your locations`;
+        return `Onsite in ${job.location} — not one of your locations`;
       }
     }
   }

@@ -389,6 +389,11 @@ export async function scoreFit(
   // policy) — enforced here rather than trusted from the model, so the
   // stored score can never contradict its own rationale/gaps the way a
   // model-computed score can (see `hardPreferenceConflict`'s doc comment).
+  // fit.v1.md's rule is "caps the score at 40 AND must be named in
+  // `gaps`" — the clamp fires precisely when the model missed the
+  // conflict, so in exactly those cases its own `gaps` doesn't mention it
+  // either; prepending the reason here keeps the stored 40 self-explaining
+  // instead of sitting next to a rationale that still reads like an 85.
   const conflict = hardPreferenceConflict({
     job: { remote: job.remote, location: job.location, companyName: job.companyName },
     prefs: prefsRow
@@ -400,7 +405,13 @@ export async function scoreFit(
       : null,
   });
   const output: FitOutput = conflict
-    ? { ...fitResult.output, score: Math.min(fitResult.output.score, FIT_HARD_PREFERENCE_CAP) }
+    ? {
+        ...fitResult.output,
+        score: Math.min(fitResult.output.score, FIT_HARD_PREFERENCE_CAP),
+        gaps: fitResult.output.gaps.includes(conflict)
+          ? fitResult.output.gaps
+          : [conflict, ...fitResult.output.gaps],
+      }
     : fitResult.output;
 
   await upsertJobScore(db, {

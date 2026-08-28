@@ -225,6 +225,55 @@ describe("runFit", () => {
 
     expect(result.output.matched).toHaveLength(1);
   });
+
+  it("still strips an invented match when a whitespace-only requirement is also present", async () => {
+    const { db } = fakeDb();
+    // `requirements[].text` is only `z.string().min(1)` — a single-space
+    // value is schema-valid but must not normalize to `""` and short-circuit
+    // the check for every other (real) requirement.
+    const analysis: AnalyzeOutput = {
+      ...ANALYSIS,
+      requirements: [{ text: " ", must_have: false }, ...ANALYSIS.requirements],
+    };
+    const { model } = replyWith({
+      ...FIT,
+      matched: [
+        { requirement: "3 years of Go", fact_ids: ["F-001"] },
+        { requirement: "Python skill", fact_ids: ["F-002"] },
+      ],
+    });
+
+    const result = await runFit(db, {
+      analysis,
+      facts: FACTS,
+      userId: null,
+      _internal: { model },
+    });
+
+    expect(result.output.matched).toEqual([{ requirement: "3 years of Go", fact_ids: ["F-001"] }]);
+    expect(result.strippedMatchCount).toBe(1);
+  });
+
+  it("strips a candidate-fact claim that merely contains a short posting requirement as a substring", async () => {
+    const { db } = fakeDb();
+    const analysis: AnalyzeOutput = { ...ANALYSIS, requirements: [{ text: "Node.js", must_have: true }] };
+    const { model } = replyWith({
+      ...FIT,
+      // A candidate fact, not the posting's own (two-word) requirement text
+      // — padded well past the 15-char reverse-containment floor.
+      matched: [{ requirement: "Strong Node.js skills from personal projects", fact_ids: ["F-002"] }],
+    });
+
+    const result = await runFit(db, {
+      analysis,
+      facts: FACTS,
+      userId: null,
+      _internal: { model },
+    });
+
+    expect(result.output.matched).toEqual([]);
+    expect(result.strippedMatchCount).toBe(1);
+  });
 });
 
 describe("runTailor", () => {

@@ -121,16 +121,31 @@ describe("assessJob", () => {
 
 describe("hardPreferenceConflict", () => {
   const job = { remote: false, location: "Research Triangle Park, NC", companyName: "Cisco" };
+  // `remote: "any"` rules nothing out — the common case (the owner's own
+  // `search_prefs` row is `remote: "any"`) — so a bare city list stays
+  // advisory, same as `isPreferredLocation()` and `assessJob()`'s own soft
+  // caveat treat it. Only `remote: "onsite"` is a stated commitment to
+  // being physically somewhere, which is what makes the location branch a
+  // genuine hard-preference contradiction below.
   const prefs = { remote: "any" as const, locations: ["Calgary, AB", "Remote"], excludedCompanies: [] };
+  const onsitePrefs = { ...prefs, remote: "onsite" as const };
 
-  it("flags an onsite posting outside every location the candidate named", () => {
-    const reason = hardPreferenceConflict({ job, prefs });
+  it("is silent for an onsite posting outside the candidate's locations when they left remote open (remote: any)", () => {
+    expect(hardPreferenceConflict({ job, prefs })).toBeNull();
+  });
+
+  it("flags an onsite posting outside every location the candidate named, once they said onsite only", () => {
+    const reason = hardPreferenceConflict({ job, prefs: onsitePrefs });
     expect(reason).toMatch(/Research Triangle Park, NC/);
     expect(reason).toMatch(/not one of your locations/);
   });
 
-  it("is silent when the posting is in one of the candidate's locations", () => {
-    expect(hardPreferenceConflict({ job: { ...job, location: "Calgary, AB" }, prefs })).toBeNull();
+  it("is silent when the posting is in one of the onsite-only candidate's locations", () => {
+    expect(hardPreferenceConflict({ job: { ...job, location: "Calgary, AB" }, prefs: onsitePrefs })).toBeNull();
+  });
+
+  it("is silent when the job has no location at all, even for an onsite-only candidate", () => {
+    expect(hardPreferenceConflict({ job: { ...job, location: null }, prefs: onsitePrefs })).toBeNull();
   });
 
   it("is silent when remote and the candidate listed Remote", () => {
@@ -143,7 +158,7 @@ describe("hardPreferenceConflict", () => {
   });
 
   it("flags an onsite-only candidate against a remote posting", () => {
-    const reason = hardPreferenceConflict({ job: { ...job, remote: true }, prefs: { ...prefs, remote: "onsite" } });
+    const reason = hardPreferenceConflict({ job: { ...job, remote: true }, prefs: onsitePrefs });
     expect(reason).toMatch(/only interested in onsite/);
   });
 
@@ -155,8 +170,8 @@ describe("hardPreferenceConflict", () => {
     expect(reason).toMatch(/excluded-companies list/);
   });
 
-  it("is silent when the candidate never set a locations preference", () => {
-    expect(hardPreferenceConflict({ job, prefs: { ...prefs, locations: [] } })).toBeNull();
+  it("is silent when the onsite-only candidate never set a locations preference", () => {
+    expect(hardPreferenceConflict({ job, prefs: { ...onsitePrefs, locations: [] } })).toBeNull();
   });
 
   it("is silent with no prefs on file at all", () => {

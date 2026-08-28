@@ -17,6 +17,7 @@ export {
   type FitPrefs,
   type FitJobContext,
   type RunFitArgs,
+  type FitStepResult,
 } from "./fit";
 export {
   runTailor,

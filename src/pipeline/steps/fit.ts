@@ -131,11 +131,27 @@ export function invalidMatchIndexes(
   output: FitOutput,
   analysis: AnalyzeOutput,
 ): number[] {
-  const posted = analysis.requirements.map((r) => normalizeRequirementText(r.text));
+  // `requirements[].text` is only `z.string().min(1)` (`../schemas.ts`), so
+  // a whitespace-only value is schema-valid but normalizes to `""` — and
+  // `claim.includes("")` is true for every claim, which would silently
+  // disable this check entirely for that one posting. Drop empties before
+  // comparing rather than let a single degenerate requirement pass every
+  // match through unchecked.
+  const posted = analysis.requirements
+    .map((r) => normalizeRequirementText(r.text))
+    .filter((r) => r.length > 0);
   const invalid: number[] = [];
   output.matched.forEach((match, i) => {
     const claim = normalizeRequirementText(match.requirement);
-    const quoted = claim.length > 0 && posted.some((r) => r.includes(claim) || claim.includes(r));
+    // `r.includes(claim)` catches the model trimming/re-punctuating a
+    // posting requirement it quoted in full. The reverse — `claim.includes(r)`
+    // — is what actually needs the posting's own text to be a real
+    // requirement, not a short, generic fragment ("Node.js", "Team work")
+    // that would let an unrelated candidate-fact claim ("Strong Node.js
+    // skills from personal projects") through just because it happens to
+    // contain the word. Gate the reverse direction on the posting text
+    // being long enough to be a genuine quotation rather than a fragment.
+    const quoted = claim.length > 0 && posted.some((r) => r.includes(claim) || (r.length >= 15 && claim.includes(r)));
     if (!quoted) invalid.push(i);
   });
   return invalid;
@@ -161,15 +177,38 @@ export function stripInventedMatches(
   };
 }
 
+/** {@link StepResult}<FitOutput>, plus how many `matched` entries {@link stripInventedMatches} discarded — see `runFit`'s doc comment. */
+export interface FitStepResult extends StepResult<FitOutput> {
+  strippedMatchCount: number;
+}
+
 export async function runFit(
   db: Db,
   args: RunFitArgs,
-): Promise<StepResult<FitOutput>> {
+): Promise<FitStepResult> {
   const result = await runStep(db, "fit", {
     ...args,
     schema: FitOutput,
     prompt: buildFitPrompt(args),
   });
 
-  return { ...result, output: stripInventedMatches(result.output, args.analysis) };
+  const strippedMatchCount = invalidMatchIndexes(result.output, args.analysis).length;
+  const output = stripInventedMatches(result.output, args.analysis);
+
+  if (strippedMatchCount > 0) {
+    // Previously silent — nothing in `generations`/`job_scores` recorded
+    // that this fired, so there was no way to tell whether the guard was
+    // doing anything or how often the prompt was being violated. The raw
+    // model reply is still in `generations.output` (`runStep` persists it)
+    // for anyone who needs to see what it actually said; this just makes
+    // the strip itself observable, and `strippedMatchCount` on the return
+    // value lets a caller (e.g. `scoreFit`) act on the rate rather than
+    // only ever seeing the already-cleaned output.
+    console.warn(
+      `[fit] stripped ${strippedMatchCount}/${result.output.matched.length} invented match(es) ` +
+        `(generation ${result.generationId}, job ${args.jobId ?? "unknown"})`,
+    );
+  }
+
+  return { ...result, output, strippedMatchCount };
 }
