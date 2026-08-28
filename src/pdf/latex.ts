@@ -486,7 +486,7 @@ export interface ResolvedProject {
  * Backslash-escaped braces (`\{`, `\}`) do not count toward the balance —
  * `\{` is a literal brace in LaTeX, not a group delimiter.
  */
-function readBalancedGroup(
+export function readBalancedGroup(
   src: string,
   start: number,
 ): { value: string; end: number } | null {

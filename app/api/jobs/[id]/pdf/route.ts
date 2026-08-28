@@ -11,6 +11,7 @@ import { getConfirmedFacts } from "@/src/profile/facts";
 import { checkContact, contactProblemSummary } from "@/src/profile/contact";
 import { renderResumePdf } from "@/src/pdf/render";
 import { isLatexAvailable, renderLatexResume } from "@/src/pdf/latex";
+import { enrichTailorFromBase } from "@/src/pdf/base-entries";
 import { downloadTranscript, getLatexBase } from "@/src/pdf/resume-base";
 
 // @react-pdf/renderer needs Node APIs (Buffer, fontkit) — pin this route to
@@ -166,6 +167,15 @@ export async function POST(
   }
 
   if (!pdf) {
+    // The react-pdf template has no base document, so an entry header is only
+    // as complete as the tailored output — and the tailored output is only as
+    // complete as the confirmed facts, which for this user carry employer,
+    // title and location but no date ranges. QA's blocker: an EXPERIENCE block
+    // no ATS could date. The dates are in the user's own `resume_bases.latex`;
+    // `enrichTailorFromBase` copies them (and, for a pre-1.2.0 generation with
+    // only loose `sections`, reconstructs the entries themselves) without a
+    // model call and without overwriting anything the model did cite. A no-op
+    // when the user has no base resume.
     pdf = await renderResumePdf({
       profile: {
         name: contact.name?.trim() || user.email,
@@ -173,7 +183,7 @@ export async function POST(
         phone: contact.phone?.trim() ?? "",
         links: contact.links ?? [],
       },
-      tailor: sanitized,
+      tailor: enrichTailorFromBase(sanitized, base?.latex),
       education,
     });
   }
