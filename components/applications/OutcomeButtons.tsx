@@ -35,7 +35,9 @@ async function parseErrorBody(res: Response): Promise<string> {
 export function OutcomeButtons({ applicationId }: { applicationId: string }) {
   const router = useRouter();
   const [pendingType, setPendingType] = useState<OutcomeEventType | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const busy = pendingType !== null || deleting;
 
   async function logOutcome(type: OutcomeEventType) {
     setPendingType(type);
@@ -62,6 +64,31 @@ export function OutcomeButtons({ applicationId }: { applicationId: string }) {
     }
   }
 
+  /**
+   * Removes the row outright (not an outcome event) — for applications
+   * created by mistake, e.g. the wrong job or a test click. Withdrawing
+   * alone already unhides the job on `/jobs` (`countsAsApplied`,
+   * src/rank/candidates.ts); this is for actually deleting the record.
+   */
+  async function deleteApplication() {
+    if (!window.confirm("Delete this application? This can't be undone.")) return;
+    setDeleting(true);
+    setError(null);
+
+    try {
+      const res = await fetch(`/api/applications/${applicationId}`, { method: "DELETE" });
+      if (!res.ok) {
+        setError(await parseErrorBody(res));
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError("Couldn't reach the server. Try again.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap gap-1">
@@ -70,12 +97,20 @@ export function OutcomeButtons({ applicationId }: { applicationId: string }) {
             key={button.type}
             size="xs"
             variant="outline"
-            disabled={pendingType !== null}
+            disabled={busy}
             onClick={() => logOutcome(button.type)}
           >
             {pendingType === button.type ? "…" : button.label}
           </Button>
         ))}
+        <Button
+          size="xs"
+          variant="destructive"
+          disabled={busy}
+          onClick={deleteApplication}
+        >
+          {deleting ? "…" : "Delete application"}
+        </Button>
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>

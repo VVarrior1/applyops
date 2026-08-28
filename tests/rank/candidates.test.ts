@@ -5,6 +5,7 @@ import {
   candidateConditions,
   countryOverlapCondition,
   countryUnknownCondition,
+  countsAsApplied,
 } from "../../src/rank/candidates";
 
 const dialect = new PgDialect();
@@ -73,5 +74,21 @@ describe("countryUnknownCondition", () => {
     expect(rendered.params).toHaveLength(0);
     expect(rendered.sql).toContain("is null");
     expect(rendered.sql).toContain("cardinality");
+  });
+});
+
+describe("countsAsApplied", () => {
+  it("withdrawn does not count as applied — the job must reappear on /jobs", () => {
+    expect(countsAsApplied("withdrawn")).toBe(false);
+  });
+
+  it("draft does not count as applied", () => {
+    expect(countsAsApplied("draft")).toBe(false);
+  });
+
+  it("every other status counts as applied, including terminal ones", () => {
+    for (const status of ["applied", "responded", "interviewing", "offer", "rejected", "ghosted"]) {
+      expect(countsAsApplied(status)).toBe(true);
+    }
   });
 });

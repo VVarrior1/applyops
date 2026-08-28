@@ -64,6 +64,23 @@ export function lacksUsAuth(workAuth: string | null | undefined): boolean {
 }
 
 /**
+ * `applications.status` values that must NOT count as "the user has applied
+ * to this posting" for `/jobs`' exclusion filter or `assessJob`'s
+ * already-applied hard blocker — `withdrawn` (the user took it back) and
+ * `draft` (never actually submitted). Every other status (including
+ * `rejected`/`ghosted`, which are still real applications) counts as
+ * applied. Without this, withdrawing an application permanently hid the job
+ * from `/jobs` and made the detail page claim "You already applied" forever,
+ * with no way back (QA finding, Aug 2026).
+ */
+const NOT_APPLIED_STATUSES = new Set(["draft", "withdrawn"]);
+
+/** See {@link NOT_APPLIED_STATUSES}. */
+export function countsAsApplied(status: string): boolean {
+  return !NOT_APPLIED_STATUSES.has(status);
+}
+
+/**
  * The three candidate-narrowing conditions (spec items 3a–3c), included only
  * when they'd actually narrow anything:
  *
