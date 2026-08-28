@@ -280,3 +280,15 @@ describe("isRelevantRole excludes non-software engineering and IT-ops titles", (
     expect(isRelevantRole(t)).toBe(true);
   });
 });
+
+describe("isEntryLevel judges year ranges by their lower bound", () => {
+  it("keeps 1-3 / 0 to 2 year ranges, still rejects 2-5 and 4-6", async () => {
+    const { isEntryLevel } = await import("../../src/finders/filters");
+    expect(isEntryLevel("Software Developer", "1-3 years of experience with TypeScript")).toBe(true);
+    expect(isEntryLevel("Software Developer", "0 to 2 years of experience")).toBe(true);
+    expect(isEntryLevel("Software Developer", "1–3 years' experience")).toBe(true);
+    expect(isEntryLevel("Software Developer", "2 to 5 years of relevant engineering experience")).toBe(false);
+    expect(isEntryLevel("GenAI Software Developer", "4-6 years of experience in software dev")).toBe(false);
+    expect(isEntryLevel("Software Developer", "1-3 years preferred; 5+ years for senior track")).toBe(false);
+  });
+});

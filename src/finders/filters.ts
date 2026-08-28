@@ -138,7 +138,11 @@ export function isEntryLevel(title: string, description: string): boolean {
   const text = `${title ?? ""} ${description ?? ""}`.toLowerCase();
 
   if (SENIORITY_TITLE.some((re) => re.test(titleLower))) return false;
-  if (YEARS_AT_LEAST_THREE.test(text)) return false;
+  // Ranges are judged by their LOWER bound: "1-3 years" / "0 to 2 years" are
+  // new-grad territory even though "3 years" appears in the text. Ranges whose
+  // lower bound is ≤1 are stripped before the ≥3-years check runs.
+  const textForYears = text.replace(/\b[01]\s*(?:-|–|to)\s*\d{1,2}\s*\+?\s*(?:years?|yrs?)\b/g, " ");
+  if (YEARS_AT_LEAST_THREE.test(textForYears)) return false;
   if (ADVANCED_DEGREE.test(text)) return false;
   if (SENIOR_CONTEXT.some((re) => re.test(text))) return false;
 
