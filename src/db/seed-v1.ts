@@ -277,6 +277,7 @@ async function main() {
         jobDbId = await upsertJobByUrl(db, placeholderUrl, {
           companyId: placeholderCompanyId,
           title: `Unknown position (v1 job ${app.job_id})`,
+          isPlaceholder: true,
         });
         orphanedPlaceholderJobs++;
         console.warn(
@@ -288,18 +289,21 @@ async function main() {
 
     const createdAt = toDate(app.created_at) ?? new Date();
 
+    // Keyed on (userId, jobId) only — not createdAt — and matching the
+    // `applications_user_job_uq` DB constraint (drizzle/0015): at most one
+    // application per (user, job). v1's own applications.csv can have
+    // several rows for the same job_id (one per resume regeneration, not
+    // per real application — e.g. 6 rows for one real Databricks
+    // application), so this keeps only the first (earliest, since appRows
+    // are processed in CSV order) and skips the rest, rather than creating
+    // a duplicate row per regeneration the way an createdAt-keyed check
+    // would.
     const existing = await db
       .select({ id: applications.id })
       .from(applications)
-      .where(
-        and(
-          eq(applications.userId, ownerId),
-          eq(applications.jobId, jobDbId),
-          eq(applications.createdAt, createdAt),
-        ),
-      )
+      .where(and(eq(applications.userId, ownerId), eq(applications.jobId, jobDbId)))
       .limit(1);
-    if (existing.length > 0) continue; // already seeded this v1 application row
+    if (existing.length > 0) continue; // already seeded an application for this (user, job)
 
     const v1Job = v1JobIdToRow.get(app.job_id);
     const status: (typeof applications.$inferInsert)["status"] =

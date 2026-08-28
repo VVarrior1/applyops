@@ -1,4 +1,4 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { format } from "date-fns";
 import { requireUser } from "@/src/auth/require";
 import { getDb } from "@/src/db/client";
@@ -62,7 +62,10 @@ export default async function ApplicationsPage() {
     .from(applications)
     .innerJoin(jobs, eq(applications.jobId, jobs.id))
     .leftJoin(companies, eq(jobs.companyId, companies.id))
-    .where(eq(applications.userId, user.id))
+    // `isPlaceholder` excludes v1-migration-orphan rows (no real posting
+    // behind them — see src/db/schema.ts) from the owner's own table too,
+    // not just the public /results page.
+    .where(and(eq(applications.userId, user.id), eq(jobs.isPlaceholder, false)))
     .orderBy(desc(applications.createdAt));
 
   const events =

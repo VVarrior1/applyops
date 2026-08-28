@@ -34,7 +34,7 @@
  *     history.
  */
 
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/client";
 import {
   applications,
@@ -193,6 +193,10 @@ export async function loadPublicResults(db: Db): Promise<PublicResults | null> {
   if (!owner) return null;
 
   // --- Funnel: same shape as app/(app)/funnel/page.tsx, scoped to the owner. ---
+  // Joined to `jobs` (inner) and filtered on `isPlaceholder` so v1-migration
+  // orphan rows (no real posting behind them) never inflate the public
+  // funnel counts or surface as a "Company #n" / role-family row below —
+  // see src/db/schema.ts on `jobs.isPlaceholder`.
   const appRows = await db
     .select({
       id: applications.id,
@@ -201,9 +205,10 @@ export async function loadPublicResults(db: Db): Promise<PublicResults | null> {
       promptVersion: promptVersions.version,
     })
     .from(applications)
+    .innerJoin(jobs, eq(applications.jobId, jobs.id))
     .leftJoin(generations, eq(applications.tailorGenerationId, generations.id))
     .leftJoin(promptVersions, eq(generations.promptVersionId, promptVersions.id))
-    .where(eq(applications.userId, owner.userId));
+    .where(and(eq(applications.userId, owner.userId), eq(jobs.isPlaceholder, false)));
 
   const events =
     appRows.length === 0

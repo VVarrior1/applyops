@@ -259,6 +259,14 @@ export const jobs = pgTable(
     analysisGenerationId: uuid("analysis_generation_id").references(
       (): AnyPgColumn => generations.id,
     ),
+    // True only for the synthetic `v1-orphan://…` rows `src/db/seed-v1.ts`
+    // creates when an applications.csv row references a job_id missing from
+    // jobs.csv — there is no real posting behind them (no title, company,
+    // or URL worth showing). Real jobs are never placeholders. Consumers
+    // that list jobs/applications for a human (product UI, the public
+    // `/results` page) filter these out rather than render "Unknown
+    // position (v1 job …)".
+    isPlaceholder: boolean("is_placeholder").notNull().default(false),
   },
   (t) => [
     uniqueIndex("jobs_url_uq").on(t.url),
@@ -344,23 +352,34 @@ export const jobScores = pgTable(
   ],
 );
 
-export const applications = pgTable("applications", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => profiles.userId),
-  jobId: uuid("job_id")
-    .notNull()
-    .references(() => jobs.id),
-  tailorGenerationId: uuid("tailor_generation_id").references(
-    () => generations.id,
-  ),
-  resumePdfPath: text("resume_pdf_path"),
-  status: applicationStatusEnum("status").notNull().default("draft"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const applications = pgTable(
+  "applications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => profiles.userId),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    tailorGenerationId: uuid("tailor_generation_id").references(
+      () => generations.id,
+    ),
+    resumePdfPath: text("resume_pdf_path"),
+    status: applicationStatusEnum("status").notNull().default("draft"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // At most one application per (user, job): re-applying to the same
+    // posting is a status update on the existing row, not a new row — see
+    // drizzle/0015_applications_user_job_uq.sql, which also merges/removes
+    // the pre-existing duplicates (six identical `seed-v1` rows for one
+    // Databricks job were the bug this closes).
+    uniqueIndex("applications_user_job_uq").on(t.userId, t.jobId),
+  ],
+);
 
 export const outcomeEvents = pgTable(
   "outcome_events",
