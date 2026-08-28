@@ -53,6 +53,28 @@ describe("TailorOutput", () => {
     });
     expect(parsed.sections[0].bullets[0].fact_ids).toEqual([]);
   });
+
+  it("still parses a stored output written before `projects` existed", () => {
+    // The PDF route re-parses whatever the client submits, including tailor
+    // generations from before v1-parity added `projects`. Making that field
+    // required would 400 every one of them.
+    const parsed = TailorOutput.parse(valid);
+    expect(parsed.projects).toBeUndefined();
+  });
+
+  it("accepts the v1-parity `projects` list", () => {
+    const parsed = TailorOutput.parse({
+      ...valid,
+      projects: [
+        {
+          name: "KanDoIt",
+          technologies: "Next.js, Prisma",
+          bullets: [{ text: "Built a Kanban app", fact_ids: ["F-002"] }],
+        },
+      ],
+    });
+    expect(parsed.projects?.[0].name).toBe("KanDoIt");
+  });
 });
 
 describe("AnalyzeOutput", () => {

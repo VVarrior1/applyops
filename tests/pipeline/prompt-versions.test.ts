@@ -62,7 +62,9 @@ function fakeDb(script: {
 
 describe("loadPrompt", () => {
   it("reads the version from the file's front matter", () => {
-    expect(loadPrompt("tailor").version).toBe("1.0.0");
+    // Bumped to 1.1.0 when the prompt gained the `projects` field
+    // (v1 parity — see src/pipeline/schemas.ts).
+    expect(loadPrompt("tailor").version).toBe("1.1.0");
   });
 
   it("returns a stable sha256 across calls", () => {
@@ -91,7 +93,7 @@ describe("loadPrompt", () => {
     for (const step of PROMPT_STEPS) {
       const p = loadPrompt(step);
       expect(p.step).toBe(step);
-      expect(p.version).toBe("1.0.0");
+      expect(p.version).toMatch(/^\d+\.\d+\.\d+$/);
       expect(p.content.trim().length).toBeGreaterThan(0);
       shas.add(p.sha256);
     }

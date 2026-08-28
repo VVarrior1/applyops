@@ -73,19 +73,32 @@ function isTailor(
 
 /**
  * Flatten a step output into the claims that must be cited. For `tailor` that
- * is every bullet; for `suggest` it is every `lead_with` entry plus the
- * `weekend_build` (the `gaps` describe the *job*, not the candidate, so they
- * carry no citations and are not claims).
+ * is every bullet — in `sections` *and* in `projects`; for `suggest` it is
+ * every `lead_with` entry plus the `weekend_build` (the `gaps` describe the
+ * *job*, not the candidate, so they carry no citations and are not claims).
+ *
+ * `projects[i].bullets[j]` is checked for the same reason `sections` is: the
+ * LaTeX renderer (`src/pdf/latex.ts`) writes the Projects block from
+ * `projects`, so a bullet that escaped this check would reach a PDF uncited.
  */
 function collectClaims(output: TailorOutput | SuggestOutput): Claim[] {
   if (isTailor(output)) {
-    return output.sections.flatMap((section, s) =>
-      section.bullets.map((bullet, b) => ({
-        path: `sections[${s}].bullets[${b}]`,
-        text: bullet.text,
-        factIds: bullet.fact_ids ?? [],
-      })),
-    );
+    return [
+      ...output.sections.flatMap((section, s) =>
+        section.bullets.map((bullet, b) => ({
+          path: `sections[${s}].bullets[${b}]`,
+          text: bullet.text,
+          factIds: bullet.fact_ids ?? [],
+        })),
+      ),
+      ...(output.projects ?? []).flatMap((project, p) =>
+        project.bullets.map((bullet, b) => ({
+          path: `projects[${p}].bullets[${b}]`,
+          text: bullet.text,
+          factIds: bullet.fact_ids ?? [],
+        })),
+      ),
+    ];
   }
 
   const claims: Claim[] = output.lead_with.map((entry, i) => ({
@@ -149,7 +162,9 @@ export function blockedPaths(report: HallucinationReport): string[] {
 
 /**
  * A `tailor` output with every unsupported bullet removed — what actually goes
- * into the PDF. Sections left with no bullets are dropped too.
+ * into the PDF. Sections left with no bullets are dropped too, and so are
+ * `projects` entries left with none: a project heading with no bullet under it
+ * is just an unevidenced claim that the candidate built the thing.
  */
 export function stripUnsupportedBullets(
   output: TailorOutput,
@@ -165,5 +180,16 @@ export function stripUnsupportedBullets(
     }))
     .filter((section) => section.bullets.length > 0);
 
-  return { ...output, sections };
+  if (!output.projects) return { ...output, sections };
+
+  const projects = output.projects
+    .map((project, p) => ({
+      ...project,
+      bullets: project.bullets.filter(
+        (_, b) => !blocked.has(`projects[${p}].bullets[${b}]`),
+      ),
+    }))
+    .filter((project) => project.bullets.length > 0);
+
+  return { ...output, sections, projects };
 }

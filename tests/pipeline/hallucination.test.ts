@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   checkCitations,
   blockedPaths,
+  stripUnsupportedBullets,
   type HallucinationReport,
 } from "../../src/pipeline/hallucination";
 import type { SuggestOutput, TailorOutput } from "../../src/pipeline/schemas";
@@ -167,5 +168,63 @@ describe("blockedPaths", () => {
       "sections[0].bullets[1]",
       "sections[0].bullets[2]",
     ]);
+  });
+});
+
+/**
+ * `TailorOutput.projects` (v1 parity — the LaTeX renderer builds the Projects
+ * block from it) has to go through the same gate as `sections`, or a
+ * fabricated project bullet would reach a PDF uncited.
+ */
+describe("checkCitations — tailor `projects` bullets", () => {
+  function withProjects(): TailorOutput {
+    return {
+      ...tailorFixture(),
+      sections: [],
+      projects: [
+        {
+          name: "KanDoIt",
+          technologies: "Next.js",
+          bullets: [
+            { text: "real", fact_ids: ["F-001"] },
+            { text: "invented", fact_ids: ["F-404"] },
+          ],
+        },
+        {
+          name: "Ghost Project",
+          technologies: "",
+          bullets: [{ text: "uncited", fact_ids: [] }],
+        },
+      ],
+    };
+  }
+
+  const report = checkCitations(withProjects(), validLabels);
+
+  it("counts a project bullet as a claim", () => {
+    expect(report.totalClaims).toBe(3);
+  });
+
+  it("flags project bullets by a projects[]-rooted path", () => {
+    expect(blockedPaths(report)).toEqual([
+      "projects[0].bullets[1]",
+      "projects[1].bullets[0]",
+    ]);
+  });
+
+  it("strips the blocked bullets and drops a project left with none", () => {
+    const stripped = stripUnsupportedBullets(withProjects(), report);
+    expect(stripped.projects).toHaveLength(1);
+    expect(stripped.projects?.[0].name).toBe("KanDoIt");
+    expect(stripped.projects?.[0].bullets.map((b) => b.text)).toEqual(["real"]);
+  });
+
+  it("leaves an output with no `projects` field untouched", () => {
+    const original = tailorFixture();
+    const stripped = stripUnsupportedBullets(
+      original,
+      checkCitations(original, validLabels),
+    );
+    expect(stripped.projects).toBeUndefined();
   });
 });

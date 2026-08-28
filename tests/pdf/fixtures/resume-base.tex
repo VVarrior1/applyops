@@ -1,0 +1,179 @@
+\documentclass[letterpaper,11pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\input{glyphtounicode}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\addtolength{\oddsidemargin}{-0.5in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textwidth}{1.in}
+\addtolength{\topmargin}{-.5in}
+\addtolength{\textheight}{1.0in}
+
+\urlstyle{same}
+
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+% Neutral section headings (no color)
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large
+}{}{0em}{}[\titlerule \vspace{-5pt}]
+
+\pdfgentounicode=1
+
+\usepackage{xcolor}
+\definecolor{myblue}{RGB}{25, 85, 180}
+\newcommand{\highlight}[1]{\textcolor{myblue}{\textbf{#1}}}
+
+% Custom commands
+\newcommand{\resumeItem}[1]{\item\small{{#1 \vspace{-2pt}}}}
+\newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{-4pt}}
+
+% FIXED: Removed \item from the beginning of the command
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textcolor{myblue}{\textbf{#1}} & \textcolor{myblue}{#2} \\
+      \textit{\small#3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+% FIXED: Removed \item from the beginning of the command
+\newcommand{\resumeProjectHeading}[2]{
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \small \textcolor{myblue}{#1} & \textcolor{myblue}{#2} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+% FIXED: Changed the weird tiny bullet to a standard bullet for nested lists
+\renewcommand\labelitemii{$\bullet$}
+
+\begin{document}
+
+
+%----------HEADING----------
+\begin{center}
+    {\Huge \scshape \textcolor{myblue}{Jane Q. Doe}} \\ \vspace{1pt}
+    \small (555) 555-0123 $|$ \href{mailto:jane.doe@example.edu}{\underline{jane.doe@example.com}} $|$ 
+    \href{https://www.example.com/in/jane-doe/}{\underline{LinkedIn}} $|$
+    \href{https://example.com/janedoe}{\underline{Github}} $|$
+    \href{https://janedoe.example.com/}{\underline{Portfolio}}
+\end{center}
+
+
+%-----------TECHNICAL SKILLS-----------
+\section{Technical Skills}
+\begin{itemize}[leftmargin=0.15in, label={}]
+  \small{\item{
+    \textbf{Proficient}{: Python, SQL, Java, TypeScript, Next.js, Git, Docker, Pandas, NumPy, Data Structures \& Algorithms, REST APIs, System Design} \\
+    \textbf{Familiar}{: C, C++, C\#, AWS, CI/CD,  Agile Methodologies, UX/UI Principles}
+  }}
+\end{itemize}
+
+%-----------EDUCATION-----------
+\section{Education}
+  \resumeSubHeadingListStart
+    \item \resumeSubheading % Manually adding \item here
+      {State University}{Springfield, ST}
+      {Bachelor of Science in Computer Science}{Dec 2026}
+      \begin{itemize}[leftmargin=0.15in, label={}]
+        \small{\item{
+          \textbf{Relevant Courses}{: Database Systems, Data Structures and Algorithms, Software Engineering Principles, Project Management, Operating Systems, Computer Networks}
+        }}
+      \end{itemize}
+      \small{\item{
+        \textbf{Certificates}{: Cloud Fundamentals, Machine Learning (MOOC), Full Stack Web Development (MOOC)}
+      }}
+  \resumeSubHeadingListEnd
+
+
+%-----------EXPERIENCE-----------
+\section{Experience}
+ 
+\resumeSubHeadingListStart
+
+\item
+  \resumeSubheading
+    {Northwind Labs}{November 2025 -- Present}
+    {Software Engineering Expert}{Remote}
+    \resumeItemListStart
+      \resumeItem{Reviewed complex algorithmic solutions and wrote structured feedback used to evaluate production systems.}
+    \resumeItemListEnd
+
+\item
+  \resumeSubheading
+    {City Utilities Board}{September 2025 -- Present}
+    {Software Engineer (Capstone Project)}{Springfield, ST}
+    \resumeItemListStart
+      \resumeItem{Built an automated data pipeline centralizing activity data from 4 business units with SQL databases and BI dashboards.}
+    \resumeItemListEnd
+
+\item
+  \resumeSubheading
+    {Contoso Retail}{March 2025 -- June 2025}
+    {Data Intern}{Springfield, ST} 
+    \resumeItemListStart
+      \resumeItem{Designed cloud pipelines analyzing 100K+ records and built React dashboards for stakeholders.}
+    \resumeItemListEnd
+
+\resumeSubHeadingListEnd
+
+%-----------PROJECTS-----------
+\section{Projects}
+\resumeSubHeadingListStart
+
+  \item \resumeProjectHeading
+    {\textbf{\href{https://booking.example.com}{\textcolor{myblue}{Pitch Booking (Live at booking.example.com)}}} $|$ \emph{Next.js, Supabase, GCP,  Vercel}}{}
+    \resumeItemListStart
+      \resumeItem{Architected and deployed a full-stack booking platform with scheduling integration and a CI/CD pipeline.}
+    \resumeItemListEnd
+
+  \item \resumeProjectHeading
+    {\textbf{\href{https://questly.example.com}{\textcolor{myblue}{Questly (Live at questly.example.com)}}} $|$ \emph{React, Next.js, TypeScript, Firebase, Tailwind CSS}}{}
+    \resumeItemListStart
+      \resumeItem{Architected a gamified productivity platform with a modular quest system and XP rewards.}
+    \resumeItemListEnd
+
+  \item \resumeProjectHeading
+    {\textbf{TaskBoard – Full-Stack KanBan App} $|$ \emph{Next.js, Prisma, SQL, Docker, Tailwind CSS}}{}
+    \resumeItemListStart
+      \resumeItem{Developed a scalable KanBan app with role-based access control and RESTful APIs using Prisma ORM.}
+    \resumeItemListEnd
+
+  \item \resumeProjectHeading
+    {\textbf{Fashion Recommendation Engine} $|$ \emph{Python, Faiss, Vector Databases, RAG}}{}
+    \resumeItemListStart
+      \resumeItem{Engineered a recommender using Faiss vector databases and a RAG pipeline for personalized style suggestions.}
+    \resumeItemListEnd
+
+  \vspace{2pt}
+  \small{\item{\textit{10+ additional projects, including full-stack apps for local businesses and data-heavy dashboards}}}
+ 
+\resumeSubHeadingListEnd
+
+
+
+
+\end{document}

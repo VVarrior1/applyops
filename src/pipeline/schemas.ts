@@ -200,6 +200,25 @@ export type FitOutput = z.infer<typeof FitOutput>;
 // tailor
 // ---------------------------------------------------------------------------
 
+/**
+ * ### `projects` — restoring v1's shape
+ *
+ * v1's tailored output named the candidate's *existing* projects
+ * (`selected_projects: {name, technologies, tailored_description}`) so the
+ * LaTeX pipeline could keep, reorder and re-bullet the real projects already
+ * in their `resume.tex` instead of inventing new ones. v2's first cut only
+ * had a flat `sections` list, which loses the one thing the splice needs: the
+ * *identity* of each project. `projects` puts it back, with ≤3 bullets each
+ * (`src/pdf/latex.ts` renders one `\resumeItem` per bullet).
+ *
+ * It is `.optional()` rather than required for exactly one reason: `tailor`
+ * generations written before this field existed are still in the database and
+ * are re-parsed by this schema every time their PDF is downloaded
+ * (`app/api/jobs/[id]/pdf/route.ts`). Making it required would turn every one
+ * of those into a 400. The prompt (`prompts/tailor.v1.md`, now 1.1.0) asks for
+ * it unconditionally, and `deriveProjectsFromSections()` in `src/pdf/latex.ts`
+ * maps the legacy rows' loose "Projects" bullets back onto the real projects.
+ */
 export const TailorOutput = z.object({
   summary: z
     .string()
@@ -216,6 +235,29 @@ export const TailorOutput = z.object({
       }),
     )
     .describe("2-4 sections ordered by relevance to the posting."),
+  projects: z
+    .array(
+      z.object({
+        name: z
+          .string()
+          .min(1)
+          .describe(
+            "The project's name exactly as the candidate's own resume writes it. Never invent a project, and never rename one.",
+          ),
+        technologies: z
+          .string()
+          .describe(
+            "Comma-separated technologies for this project, drawn from the cited facts. Empty string if the facts name none.",
+          ),
+        bullets: z
+          .array(CitedBullet)
+          .describe("1 to 3 bullets about this project, most relevant first."),
+      }),
+    )
+    .describe(
+      "Which of the candidate's EXISTING projects to keep, in the order a recruiter for this posting should see them. Drop the ones this posting does not care about; never add one that is not in the facts.",
+    )
+    .optional(),
 });
 export type TailorOutput = z.infer<typeof TailorOutput>;
 

@@ -9,6 +9,8 @@ import { TailorOutput } from "@/src/pipeline/schemas";
 import { factLabels } from "@/src/pipeline/steps";
 import { getConfirmedFacts } from "@/src/profile/facts";
 import { renderResumePdf } from "@/src/pdf/render";
+import { isLatexAvailable, renderLatexResume } from "@/src/pdf/latex";
+import { downloadTranscript, getLatexBase } from "@/src/pdf/resume-base";
 
 // @react-pdf/renderer needs Node APIs (Buffer, fontkit) — pin this route to
 // the Node runtime rather than relying on the App Router's default.
@@ -37,6 +39,24 @@ function slugify(text: string): string {
  * submitted tailor output server-side — the hallucination block is enforced
  * here, not just in the UI — then renders it with the caller's `profiles
  * .contact` and confirmed education facts and streams the PDF back.
+ *
+ * ## Two renderers
+ *
+ * LaTeX wins when both halves are true: the user has imported a `.tex` base
+ * resume (`resume_bases`, via `applyops resume import-latex`) **and** this
+ * host has `pdflatex`. That is v1's pipeline — the user's own document with
+ * the Technical Skills and Projects blocks swapped — and it is what the owner
+ * actually applies with. Otherwise the react-pdf template renders the page
+ * from scratch, which works everywhere (Vercel has no TeX) but cannot
+ * reproduce a document the user hand-tuned.
+ *
+ * A LaTeX *failure* also falls back rather than failing the download: losing
+ * the nicer PDF is bad, losing the PDF is worse. `x-applyops-renderer` on the
+ * response says which one actually ran, so the UI and a curl can both tell.
+ *
+ * `?transcript=1` appends the stored transcript (Ghostscript), for the
+ * postings that ask for one. Off by default — an ATS "resume" field wants a
+ * resume.
  */
 export async function POST(
   request: Request,
@@ -92,16 +112,46 @@ export async function POST(
     .limit(1);
   const contact = profileRow?.contact ?? {};
 
-  const pdf = await renderResumePdf({
-    profile: {
-      name: contact.name?.trim() || user.email,
-      email: contact.email?.trim() || user.email,
-      phone: contact.phone?.trim() ?? "",
-      links: contact.links ?? [],
-    },
-    tailor: sanitized,
-    education,
-  });
+  const wantsTranscript = new URL(request.url).searchParams.get("transcript") === "1";
+
+  let pdf: Buffer | null = null;
+  let renderer: "latex" | "react-pdf" = "react-pdf";
+
+  const base = await getLatexBase(db, user.id);
+  if (base && (await isLatexAvailable())) {
+    try {
+      const transcriptPdf =
+        wantsTranscript && base.transcriptPdfPath
+          ? await downloadTranscript(base.transcriptPdfPath)
+          : null;
+      const result = await renderLatexResume({
+        base: { latex: base.latex, transcriptPdf },
+        tailor: sanitized,
+        contact,
+        includeTranscript: wantsTranscript,
+      });
+      pdf = result.pdf;
+      renderer = "latex";
+    } catch (error) {
+      // Deliberately not rethrown: see the "Two renderers" note above. Logged
+      // because a base resume that stops compiling is a real problem the
+      // owner needs to hear about, even though the download still works.
+      console.error("[pdf] LaTeX render failed; falling back to react-pdf", error);
+    }
+  }
+
+  if (!pdf) {
+    pdf = await renderResumePdf({
+      profile: {
+        name: contact.name?.trim() || user.email,
+        email: contact.email?.trim() || user.email,
+        phone: contact.phone?.trim() ?? "",
+        links: contact.links ?? [],
+      },
+      tailor: sanitized,
+      education,
+    });
+  }
 
   const filename = `${slugify(job.title)}-resume.pdf`;
 
@@ -111,6 +161,7 @@ export async function POST(
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${filename}"`,
       "Content-Length": String(pdf.length),
+      "x-applyops-renderer": renderer,
     },
   });
 }
