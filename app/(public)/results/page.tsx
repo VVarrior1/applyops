@@ -2,7 +2,6 @@ import Link from "next/link";
 import { getDb } from "@/src/db/client";
 import { loadPublicResults, type BenchmarkHeadline, type EvalScorecard, type GateStatus } from "@/src/funnel/public-results";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -213,25 +212,6 @@ export default async function PublicResultsPage() {
 
   return (
     <div className="flex flex-1 flex-col">
-      <header className="border-b bg-card">
-        <div className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-3">
-          <Link href="/" className="text-sm font-semibold tracking-tight">
-            ApplyOps
-          </Link>
-          <nav className="flex flex-1 items-center gap-1 text-sm">
-            <Link
-              href="/benchmark"
-              className="rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              Benchmark
-            </Link>
-          </nav>
-          <Link href="/login" className={buttonVariants({ size: "sm", variant: "outline" })}>
-            Sign in
-          </Link>
-        </div>
-      </header>
-
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-10 px-4 py-10">
         <div>
           <h1 className="text-2xl font-semibold">Results</h1>

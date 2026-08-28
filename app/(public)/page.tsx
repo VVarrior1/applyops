@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
+import { getOptionalUser } from "@/src/auth/require";
 
 const GITHUB_URL = "https://github.com/VVarrior1/applyops";
 
@@ -26,8 +27,16 @@ const BULLETS = [
  * later build task" — this is that task); moved under the `(public)` route
  * group per the plan's locked file structure so it sits alongside
  * `/results` and `/benchmark`.
+ *
+ * The final CTA reflects session state (via `app/(public)/layout.tsx`'s
+ * `getOptionalUser()`, deduped per request) rather than always offering
+ * "Sign in" — a signed-in owner who lands here gets a way back into the
+ * app instead of a misleading invitation to sign in again (same fix as
+ * `/results` and `/benchmark`).
  */
-export default function LandingPage() {
+export default async function LandingPage() {
+  const user = await getOptionalUser();
+
   return (
     <div className="flex flex-1 flex-col">
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-10 px-4 py-16">
@@ -68,9 +77,15 @@ export default function LandingPage() {
           <Link href={GITHUB_URL} className={buttonVariants({ variant: "outline" })}>
             GitHub
           </Link>
-          <Link href="/login" className={buttonVariants({ variant: "ghost" })}>
-            Sign in (invite only)
-          </Link>
+          {user ? (
+            <Link href="/jobs" className={buttonVariants({ variant: "ghost" })}>
+              Back to Jobs
+            </Link>
+          ) : (
+            <Link href="/login" className={buttonVariants({ variant: "ghost" })}>
+              Sign in (invite only)
+            </Link>
+          )}
         </div>
       </main>
     </div>

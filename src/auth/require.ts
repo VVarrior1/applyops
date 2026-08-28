@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -14,6 +15,26 @@ export interface SessionUser {
 }
 
 /**
+ * Session lookup that never redirects — `null` when there is no session (or
+ * the session's user has no verified email). Wrapped in React's `cache()`
+ * so a layout and the page it wraps (e.g. `app/(public)/layout.tsx` and
+ * `app/(public)/results/page.tsx`) share one Supabase `getUser()` call per
+ * request instead of each paying its own round trip.
+ */
+export const getOptionalUser = cache(async (): Promise<SessionUser | null> => {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user || !user.email) {
+    return null;
+  }
+
+  return { id: user.id, email: user.email };
+});
+
+/**
  * Server-side session guard for Server Components, Route Handlers, and
  * Server Actions under `app/(app)/**`. `middleware.ts` already blocks
  * unauthenticated requests to these routes, but calling this here too is
@@ -24,16 +45,13 @@ export interface SessionUser {
  * session).
  */
 export async function requireUser(): Promise<SessionUser> {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getOptionalUser();
 
-  if (!user || !user.email) {
+  if (!user) {
     redirect("/login");
   }
 
-  return { id: user.id, email: user.email };
+  return user;
 }
 
 /**

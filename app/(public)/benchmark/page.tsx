@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { unstable_cache } from "next/cache";
 import {
   BENCHMARK_CACHE_SECONDS,
@@ -274,13 +273,7 @@ export default async function BenchmarkPage() {
   return (
     <div className="mx-auto w-full max-w-4xl flex-1 px-4 py-16">
       <header>
-        <Link
-          href="/"
-          className="text-sm font-semibold tracking-tight text-muted-foreground hover:text-foreground"
-        >
-          ApplyOps
-        </Link>
-        <h1 className="mt-8 text-3xl font-semibold tracking-tight">Model benchmark</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Model benchmark</h1>
         <p className="mt-3 max-w-2xl text-base leading-relaxed text-muted-foreground">
           ApplyOps runs four LLM steps over a job posting. Picking a model for each one is a
           measurement, not a preference — so every candidate model is run over the same frozen
