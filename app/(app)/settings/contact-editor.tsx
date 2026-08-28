@@ -1,16 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { CircleCheckIcon, TriangleAlertIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { checkContact, type ProfileContact } from "@/src/profile/contact";
 
-export interface Contact {
-  name?: string;
-  email?: string;
-  phone?: string;
-  links?: string[];
-}
+/** Kept as the component's own prop name; `ProfileContact` is the shared shape. */
+export type Contact = ProfileContact;
 
 async function parseErrorBody(res: Response): Promise<string> {
   try {
@@ -25,6 +23,14 @@ async function parseErrorBody(res: Response): Promise<string> {
  * `profiles.contact` editor — the resume header (name/email/phone/links)
  * `renderResumePdf()` puts on every generated PDF (plan Task 9: "Contact
  * fields ... come from `profiles` ... edited in Settings").
+ *
+ * Runs `checkContact()` (`src/profile/contact.ts`) live against what is
+ * currently typed, because this card is the *only* place a user can fix the
+ * thing that blocks a PDF download. QA found the owner's row holding seed
+ * data ("ApplyOps Test Resume", `candidate@example.com`, `555-0100`) with
+ * this editor showing it as if it were fine; the same function now refuses
+ * the download in `POST /api/jobs/[id]/pdf`, so the warning here and the
+ * block there are guaranteed to agree.
  */
 export function ContactEditor({ initialContact }: { initialContact: Contact }) {
   const [name, setName] = useState(initialContact.name ?? "");
@@ -35,15 +41,24 @@ export function ContactEditor({ initialContact }: { initialContact: Contact }) {
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
+  const links = useMemo(
+    () =>
+      linksText
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    [linksText],
+  );
+
+  const problems = useMemo(
+    () => checkContact({ name, email, phone, links }),
+    [name, email, phone, links],
+  );
+
   async function handleSave() {
     setSaving(true);
     setError(null);
     try {
-      const links = linksText
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean);
-
       const res = await fetch("/api/profile/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -63,6 +78,37 @@ export function ContactEditor({ initialContact }: { initialContact: Contact }) {
 
   return (
     <div className="flex flex-col gap-3">
+      {problems.length > 0 ? (
+        <div
+          role="alert"
+          data-testid="contact-problems"
+          className="flex gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2.5 text-sm"
+        >
+          <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
+          <div className="flex flex-col gap-1">
+            <p className="font-medium text-destructive">
+              This contact block isn&apos;t ready to send to an employer.
+            </p>
+            <ul className="list-disc pl-4 text-muted-foreground">
+              {problems.map((problem, i) => (
+                <li key={`${problem.field}-${i}`}>{problem.message}</li>
+              ))}
+            </ul>
+            <p className="text-muted-foreground">
+              Resume downloads stay blocked until these are fixed.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <p
+          data-testid="contact-ok"
+          className="flex items-center gap-1.5 text-sm text-muted-foreground"
+        >
+          <CircleCheckIcon className="size-4 shrink-0" aria-hidden />
+          Ready to print on a resume.
+        </p>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="contact-name">Name</Label>

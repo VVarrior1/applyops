@@ -63,3 +63,4 @@ tmp/
 eval-report.json
 eval-report.html
 .vercel
+docs/local/

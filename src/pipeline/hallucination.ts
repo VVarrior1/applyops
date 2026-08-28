@@ -73,13 +73,17 @@ function isTailor(
 
 /**
  * Flatten a step output into the claims that must be cited. For `tailor` that
- * is every bullet — in `sections` *and* in `projects`; for `suggest` it is
- * every `lead_with` entry plus the `weekend_build` (the `gaps` describe the
- * *job*, not the candidate, so they carry no citations and are not claims).
+ * is every bullet — in `sections`, in `experience` *and* in `projects`; for
+ * `suggest` it is every `lead_with` entry plus the `weekend_build` (the `gaps`
+ * describe the *job*, not the candidate, so they carry no citations and are
+ * not claims).
  *
- * `projects[i].bullets[j]` is checked for the same reason `sections` is: the
- * LaTeX renderer (`src/pdf/latex.ts`) writes the Projects block from
- * `projects`, so a bullet that escaped this check would reach a PDF uncited.
+ * `experience[i].bullets[j]` and `projects[i].bullets[j]` are checked for the
+ * same reason `sections` is: both renderers write the Experience and Projects
+ * blocks from those arrays, so a bullet that escaped this check would reach a
+ * PDF uncited. (The entry *headers* — organization, role, dates — carry no
+ * `fact_ids` and so cannot be checked here; the prompt is what constrains
+ * them, and they are copied from facts the extract step already confirmed.)
  */
 function collectClaims(output: TailorOutput | SuggestOutput): Claim[] {
   if (isTailor(output)) {
@@ -87,6 +91,13 @@ function collectClaims(output: TailorOutput | SuggestOutput): Claim[] {
       ...output.sections.flatMap((section, s) =>
         section.bullets.map((bullet, b) => ({
           path: `sections[${s}].bullets[${b}]`,
+          text: bullet.text,
+          factIds: bullet.fact_ids ?? [],
+        })),
+      ),
+      ...(output.experience ?? []).flatMap((entry, e) =>
+        entry.bullets.map((bullet, b) => ({
+          path: `experience[${e}].bullets[${b}]`,
           text: bullet.text,
           factIds: bullet.fact_ids ?? [],
         })),
@@ -163,33 +174,52 @@ export function blockedPaths(report: HallucinationReport): string[] {
 /**
  * A `tailor` output with every unsupported bullet removed — what actually goes
  * into the PDF. Sections left with no bullets are dropped too, and so are
- * `projects` entries left with none: a project heading with no bullet under it
- * is just an unevidenced claim that the candidate built the thing.
+ * `experience`/`projects` entries left with none: an employer or project
+ * heading with no bullet under it is just an unevidenced claim that the
+ * candidate worked there or built the thing.
  */
 export function stripUnsupportedBullets(
   output: TailorOutput,
   report: HallucinationReport,
 ): TailorOutput {
   const blocked = new Set(blockedPaths(report));
-  const sections = output.sections
-    .map((section, s) => ({
-      ...section,
-      bullets: section.bullets.filter(
-        (_, b) => !blocked.has(`sections[${s}].bullets[${b}]`),
-      ),
-    }))
-    .filter((section) => section.bullets.length > 0);
+  const stripped: TailorOutput = {
+    ...output,
+    sections: output.sections
+      .map((section, s) => ({
+        ...section,
+        bullets: section.bullets.filter(
+          (_, b) => !blocked.has(`sections[${s}].bullets[${b}]`),
+        ),
+      }))
+      .filter((section) => section.bullets.length > 0),
+  };
 
-  if (!output.projects) return { ...output, sections };
+  // `undefined` is preserved rather than normalised to `[]`: a legacy
+  // generation that never had these fields must round-trip through here
+  // unchanged, so a renderer can still tell "no entries" from "this run
+  // predates entries" and fall back to the loose `sections` bullets.
+  if (output.experience) {
+    stripped.experience = output.experience
+      .map((entry, e) => ({
+        ...entry,
+        bullets: entry.bullets.filter(
+          (_, b) => !blocked.has(`experience[${e}].bullets[${b}]`),
+        ),
+      }))
+      .filter((entry) => entry.bullets.length > 0);
+  }
 
-  const projects = output.projects
-    .map((project, p) => ({
-      ...project,
-      bullets: project.bullets.filter(
-        (_, b) => !blocked.has(`projects[${p}].bullets[${b}]`),
-      ),
-    }))
-    .filter((project) => project.bullets.length > 0);
+  if (output.projects) {
+    stripped.projects = output.projects
+      .map((project, p) => ({
+        ...project,
+        bullets: project.bullets.filter(
+          (_, b) => !blocked.has(`projects[${p}].bullets[${b}]`),
+        ),
+      }))
+      .filter((project) => project.bullets.length > 0);
+  }
 
-  return { ...output, sections, projects };
+  return stripped;
 }

@@ -8,6 +8,7 @@ import { checkCitations, stripUnsupportedBullets } from "@/src/pipeline/hallucin
 import { TailorOutput } from "@/src/pipeline/schemas";
 import { factLabels } from "@/src/pipeline/steps";
 import { getConfirmedFacts } from "@/src/profile/facts";
+import { checkContact, contactProblemSummary } from "@/src/profile/contact";
 import { renderResumePdf } from "@/src/pdf/render";
 import { isLatexAvailable, renderLatexResume } from "@/src/pdf/latex";
 import { downloadTranscript, getLatexBase } from "@/src/pdf/resume-base";
@@ -57,6 +58,19 @@ function slugify(text: string): string {
  * `?transcript=1` appends the stored transcript (Ghostscript), for the
  * postings that ask for one. Off by default — an ATS "resume" field wants a
  * resume.
+ *
+ * ## The contact gate
+ *
+ * Before either renderer runs, `profiles.contact` has to look like a real
+ * person (`checkContact`, `src/profile/contact.ts`). QA caught this route
+ * happily producing a download headed "ApplyOps Test Resume /
+ * candidate@example.com | 555-0100" from a seed row. Every other guard in
+ * this file protects the *body* of the resume (`checkCitations`,
+ * `stripUnsupportedBullets`); nothing protected the header, which is the one
+ * part an employer reads first. A `422` with the specific problems is the
+ * right answer rather than rendering with a warning header: the failure mode
+ * is a file already attached to an application, at which point no banner in
+ * the app can help.
  */
 export async function POST(
   request: Request,
@@ -111,6 +125,17 @@ export async function POST(
     .where(eq(profiles.userId, user.id))
     .limit(1);
   const contact = profileRow?.contact ?? {};
+
+  const contactProblems = checkContact(contact);
+  if (contactProblems.length > 0) {
+    return NextResponse.json(
+      {
+        error: contactProblemSummary(contactProblems),
+        contactProblems,
+      },
+      { status: 422 },
+    );
+  }
 
   const wantsTranscript = new URL(request.url).searchParams.get("transcript") === "1";
 

@@ -161,14 +161,38 @@ function BulletList({
         </div>
       </div>
 
-      {sample.output.sections.map((section, s) => (
-        <div key={`${section.heading}-${s}`}>
+      {/* Every block of bullets a tailor output can hold, in the order the PDF
+          renders them: employers, then projects, then any extra sections. A
+          pre-1.2.0 generation has only `sections`, so it grades exactly as it
+          always did. `path` must match `checkCitations()`'s pointer for the
+          unsupported highlighting to line up. */}
+      {[
+        ...(sample.output.experience ?? []).map((entry, e) => ({
+          key: `experience-${e}`,
+          heading: [entry.organization, entry.role].filter(Boolean).join(" — "),
+          bullets: entry.bullets,
+          pathFor: (b: number) => `experience[${e}].bullets[${b}]`,
+        })),
+        ...(sample.output.projects ?? []).map((project, p) => ({
+          key: `project-${p}`,
+          heading: project.name,
+          bullets: project.bullets,
+          pathFor: (b: number) => `projects[${p}].bullets[${b}]`,
+        })),
+        ...sample.output.sections.map((section, s) => ({
+          key: `section-${section.heading}-${s}`,
+          heading: section.heading,
+          bullets: section.bullets,
+          pathFor: (b: number) => `sections[${s}].bullets[${b}]`,
+        })),
+      ].map((block) => (
+        <div key={block.key}>
           <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {section.heading}
+            {block.heading}
           </div>
           <ul className="mt-1.5 flex flex-col gap-2">
-            {section.bullets.map((bullet, b) => {
-              const path = `sections[${s}].bullets[${b}]`;
+            {block.bullets.map((bullet, b) => {
+              const path = block.pathFor(b);
               const bad = unsupported.has(path);
               return (
                 <li

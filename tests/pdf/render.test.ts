@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderResumePdf } from "@/src/pdf/render";
+import { documentTitle } from "@/src/pdf/ResumeDocument";
 import type { TailorOutput, Fact } from "@/src/pipeline/schemas";
 
 const MINIMAL_TAILOR: TailorOutput = {
@@ -40,5 +41,20 @@ describe("renderResumePdf", () => {
     });
 
     expect(buffer.subarray(0, 4).toString("latin1")).toBe("%PDF");
+  });
+});
+
+describe("documentTitle", () => {
+  it("appends '— Resume' to a real name", () => {
+    expect(documentTitle("Dana Okonkwo")).toBe("Dana Okonkwo — Resume");
+  });
+
+  it("never produces a title that starts with the dash", () => {
+    // QA saw the metadata title " — Resume" / "ApplyOps Test Resume — Resume";
+    // an empty or already-'Resume' name must not be interpolated blindly.
+    expect(documentTitle("")).toBe("Resume");
+    expect(documentTitle("   ")).toBe("Resume");
+    expect(documentTitle("Dana Okonkwo Resume")).toBe("Dana Okonkwo Resume");
+    expect(documentTitle("Dana Okonkwo Résumé")).toBe("Dana Okonkwo Résumé");
   });
 });

@@ -21,6 +21,7 @@ import { checkCitations, stripUnsupportedBullets } from "../../src/pipeline/hall
 import { TailorOutput } from "../../src/pipeline/schemas";
 import { factLabels } from "../../src/pipeline/steps";
 import { getConfirmedFacts } from "../../src/profile/facts";
+import { checkContact } from "../../src/profile/contact";
 import { resolveUserId } from "../user-lookup";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -131,6 +132,20 @@ export function register(program: Command): void {
           .where(eq(profiles.userId, userId))
           .limit(1);
         const contact = profileRow?.contact ?? {};
+
+        // The web download (`POST /api/jobs/[id]/pdf`) refuses outright when
+        // the contact block is seed/placeholder data. This command writes to
+        // the operator's own `out/` rather than handing a file to a user, so
+        // it warns instead of failing — but it must not stay silent: QA found
+        // a resume rendered with "candidate@example.com" and nothing said so.
+        const contactProblems = checkContact(contact);
+        if (contactProblems.length > 0) {
+          process.stderr.write(
+            "\nWARNING: this resume's contact block is not application-ready:\n" +
+              contactProblems.map((problem) => `  - ${problem.message}\n`).join("") +
+              "  Fix it in Settings → Resume contact info before sending this PDF anywhere.\n",
+          );
+        }
 
         const outDir = path.resolve(options.out ?? "out");
         await mkdir(outDir, { recursive: true });

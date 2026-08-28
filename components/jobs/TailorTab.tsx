@@ -1,14 +1,22 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { TriangleAlertIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { HallucinationReport } from "./HallucinationReport";
 import type { TailorOutput } from "@/src/pipeline/schemas";
 import type { HallucinationReport as HallucinationReportData } from "@/src/pipeline/hallucination";
-import { tailorBulletPath, type TailorUserEdits } from "@/src/pipeline/tailor-edits";
+import {
+  experienceBulletPath,
+  projectBulletPath,
+  tailorBulletPath,
+  type TailorUserEdits,
+} from "@/src/pipeline/tailor-edits";
+import type { ContactProblem } from "@/src/profile/contact";
 
 /** What `/jobs/[id]` loads server-side for the most recent `tailor` generation, if any. */
 export interface TailorInitialGeneration {
@@ -37,9 +45,37 @@ interface EditableBullet {
   included: boolean;
 }
 
-interface EditableSection {
-  heading: string;
+/**
+ * One editable block on the tab. Since prompt 1.2.0 a tailor output's bullets
+ * live in three places — `sections[i]`, `experience[i]` (an employer/role,
+ * with its own header line) and `projects[i]` — and all three are editable,
+ * so the tab works in terms of "groups" rather than sections alone. `kind` +
+ * `index` is what maps a group back onto the original output when the payload
+ * is rebuilt for the PDF, which is also where the entry headers (organization,
+ * role, dates, stack) come from: they are never retyped here, so they cannot
+ * be edited into something the facts do not support.
+ */
+type GroupKind = "section" | "experience" | "project";
+
+interface EditableGroup {
+  kind: GroupKind;
+  /** Index within `output.sections` / `output.experience` / `output.projects`. */
+  index: number;
+  /** The block label: a section heading, or "Experience"/"Projects". */
+  label: string;
+  /** Employer or project name — empty for a plain section. */
+  title: string;
+  /** Role · location · dates, or the project's tech stack. */
+  subtitle: string;
   bullets: EditableBullet[];
+}
+
+/** `June 2025 – Present`, `June 2025`, `Present`, or `""`. */
+function dateRange(start?: string, end?: string): string {
+  const from = (start ?? "").trim();
+  const to = (end ?? "").trim();
+  if (from && to) return `${from} – ${to}`;
+  return from || to;
 }
 
 async function parseErrorBody(res: Response): Promise<string> {
@@ -62,18 +98,21 @@ async function parseErrorBody(res: Response): Promise<string> {
  * and locked, regardless of any stored overlay — that exclusion is derived
  * fresh from the *current* facts on every load, never stored.
  */
-function buildEditableSections(
+function buildEditableGroups(
   output: TailorOutput,
   hallucination: HallucinationReportData,
   userEdits: TailorUserEdits | null,
-): EditableSection[] {
+): EditableGroup[] {
   const unsupportedPaths = new Set(hallucination.unsupported.map((claim) => claim.path));
   const editedText = userEdits?.editedText ?? {};
   const excludedPaths = new Set(userEdits?.excludedPaths ?? []);
-  return output.sections.map((section, s) => ({
-    heading: section.heading,
-    bullets: section.bullets.map((bullet, b) => {
-      const path = tailorBulletPath(s, b);
+
+  function bulletsOf(
+    bullets: TailorOutput["sections"][number]["bullets"],
+    pathFor: (bulletIndex: number) => string,
+  ): EditableBullet[] {
+    return bullets.map((bullet, b) => {
+      const path = pathFor(b);
       const unsupported = unsupportedPaths.has(path);
       return {
         text: editedText[path] ?? bullet.text,
@@ -83,28 +122,85 @@ function buildEditableSections(
         unsupported,
         included: unsupported ? false : !excludedPaths.has(path),
       };
-    }),
-  }));
+    });
+  }
+
+  // Same order the PDF renders in: experience, projects, then whatever extra
+  // sections are left — so what the user edits reads top-to-bottom like the
+  // document they are about to download.
+  return [
+    ...(output.experience ?? []).map((entry, e) => ({
+      kind: "experience" as const,
+      index: e,
+      label: "Experience",
+      title: entry.organization,
+      subtitle: [entry.role, entry.location, dateRange(entry.start, entry.end)]
+        .map((part) => (part ?? "").trim())
+        .filter((part) => part.length > 0)
+        .join(" · "),
+      bullets: bulletsOf(entry.bullets, (b) => experienceBulletPath(e, b)),
+    })),
+    ...(output.projects ?? []).map((project, p) => ({
+      kind: "project" as const,
+      index: p,
+      label: "Projects",
+      title: project.name,
+      subtitle: (project.technologies ?? "").trim(),
+      bullets: bulletsOf(project.bullets, (b) => projectBulletPath(p, b)),
+    })),
+    ...output.sections.map((section, s) => ({
+      kind: "section" as const,
+      index: s,
+      label: section.heading,
+      title: "",
+      subtitle: "",
+      bullets: bulletsOf(section.bullets, (b) => tailorBulletPath(s, b)),
+    })),
+  ];
 }
 
-/** What actually gets sent to `/pdf` and, for the summary/skills, would be shown on the PDF. */
+/**
+ * What actually gets sent to `/pdf`.
+ *
+ * Rebuilt from the *original* generation (`source`) so every entry header —
+ * employer, role, location, dates, project name and stack — survives the round
+ * trip untouched; only bullet text and inclusion come from the edited groups.
+ * `experience`/`projects` stay `undefined` when the generation never had them
+ * (a pre-1.2.0 run), which is what makes the renderer fall back to that run's
+ * loose section bullets instead of printing an empty Experience block.
+ */
 function toTailorPayload(
+  source: TailorOutput,
   summary: string,
   skills: string[],
-  sections: EditableSection[],
+  groups: EditableGroup[],
 ): TailorOutput {
-  return {
+  const included = (kind: GroupKind, index: number) =>
+    groups
+      .find((group) => group.kind === kind && group.index === index)
+      ?.bullets.filter((b) => b.included)
+      .map((b) => ({ text: b.text, fact_ids: b.factIds })) ?? [];
+
+  const payload: TailorOutput = {
     summary,
     skills,
-    sections: sections
-      .map((section) => ({
-        heading: section.heading,
-        bullets: section.bullets
-          .filter((b) => b.included)
-          .map((b) => ({ text: b.text, fact_ids: b.factIds })),
-      }))
+    sections: source.sections
+      .map((section, s) => ({ heading: section.heading, bullets: included("section", s) }))
       .filter((section) => section.bullets.length > 0),
   };
+
+  if (source.experience) {
+    payload.experience = source.experience
+      .map((entry, e) => ({ ...entry, bullets: included("experience", e) }))
+      .filter((entry) => entry.bullets.length > 0);
+  }
+  if (source.projects) {
+    payload.projects = source.projects
+      .map((project, p) => ({ ...project, bullets: included("project", p) }))
+      .filter((project) => project.bullets.length > 0);
+  }
+
+  return payload;
 }
 
 function FactChips({ ids }: { ids: string[] }) {
@@ -127,9 +223,18 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(initialGeneration?.output.summary ?? null);
   const [skills, setSkills] = useState<string[]>(initialGeneration?.output.skills ?? []);
-  const [sections, setSections] = useState<EditableSection[]>(() =>
+  /**
+   * The generation exactly as the model returned it. Never edited — it is the
+   * source of the entry headers (employer, role, dates, stack) the PDF payload
+   * is rebuilt from, and of the shape (`experience`/`projects` present or not)
+   * a pre-1.2.0 run has to keep.
+   */
+  const [source, setSource] = useState<TailorOutput | null>(
+    initialGeneration?.output ?? null,
+  );
+  const [groups, setGroups] = useState<EditableGroup[]>(() =>
     initialGeneration
-      ? buildEditableSections(
+      ? buildEditableGroups(
           initialGeneration.output,
           initialGeneration.hallucination,
           initialGeneration.userEdits,
@@ -146,6 +251,20 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
+  /**
+   * `checkContact()`'s verdict on `profiles.contact`, from
+   * `GET /api/profile/contact`. `null` while it is still loading — the
+   * Download button is only disabled once we actually know, so a slow
+   * request never silently blocks a user with a perfectly good profile.
+   *
+   * `POST /api/jobs/[id]/pdf` refuses (422) on exactly these problems. This
+   * fetch exists so the user is told *before* spending a generation, and can
+   * be sent straight to the one page that fixes it: QA hit this as "Download
+   * PDF hands over a resume headed ApplyOps Test Resume /
+   * candidate@example.com" with nothing in the UI hinting anything was wrong.
+   */
+  const [contactProblems, setContactProblems] = useState<ContactProblem[] | null>(null);
+
   const [marking, setMarking] = useState(false);
   const [markError, setMarkError] = useState<string | null>(null);
 
@@ -157,6 +276,37 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
   const pendingEditsRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const generated = summary !== null;
+  const contactBlocked = contactProblems !== null && contactProblems.length > 0;
+
+  const refreshContact = useCallback(async () => {
+    try {
+      const res = await fetch("/api/profile/contact");
+      if (!res.ok) return;
+      const body = (await res.json()) as { problems?: ContactProblem[] };
+      setContactProblems(body.problems ?? []);
+    } catch {
+      // Offline/transient: leave the verdict unknown rather than inventing a
+      // block. The server-side 422 is the real gate; this is only the warning.
+    }
+  }, []);
+
+  useEffect(() => {
+    // Deliberately kicked off through the microtask queue rather than called
+    // straight from the effect body: `refreshContact` sets state, and doing
+    // that synchronously inside an effect is the cascading-render pattern
+    // `react-hooks/set-state-in-effect` (correctly) rejects. The state only
+    // ever lands after the fetch resolves.
+    const timer = setTimeout(() => void refreshContact(), 0);
+    // Settings opens in another tab often enough that re-checking on focus is
+    // the difference between "fixed it, banner still says no" and it clearing
+    // itself the moment the user comes back.
+    const onFocus = () => void refreshContact();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refreshContact]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -174,8 +324,9 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
       };
       setSummary(body.output.summary);
       setSkills(body.output.skills);
+      setSource(body.output);
       // A brand-new generation has no overlay yet.
-      setSections(buildEditableSections(body.output, body.hallucination, null));
+      setGroups(buildEditableGroups(body.output, body.hallucination, null));
       setHallucination(body.hallucination);
       setGenerationId(body.generationId);
       // A brand-new generation has no overlay yet — don't let the previous
@@ -216,12 +367,12 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
    *   whichever response lands second silently overwrite the newer edit
    *   with an older snapshot.
    */
-  function persistEdits(nextSections: EditableSection[]): Promise<boolean> {
+  function persistEdits(nextGroups: EditableGroup[]): Promise<boolean> {
     if (!generationId) return Promise.resolve(true);
     const editedText: Record<string, string> = {};
     const excludedPaths: string[] = [];
-    for (const section of nextSections) {
-      for (const bullet of section.bullets) {
+    for (const group of nextGroups) {
+      for (const bullet of group.bullets) {
         if (bullet.text !== bullet.originalText) editedText[bullet.path] = bullet.text;
         // A hallucination-blocked bullet is never "excluded" by the user —
         // it's excluded by the current facts, re-derived on every load, so
@@ -261,14 +412,14 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
     return run;
   }
 
-  function updateBulletText(sectionIdx: number, bulletIdx: number, text: string) {
-    setSections((prev) =>
-      prev.map((section, s) =>
-        s !== sectionIdx
-          ? section
+  function updateBulletText(groupIdx: number, bulletIdx: number, text: string) {
+    setGroups((prev) =>
+      prev.map((group, g) =>
+        g !== groupIdx
+          ? group
           : {
-              ...section,
-              bullets: section.bullets.map((bullet, b) =>
+              ...group,
+              bullets: group.bullets.map((bullet, b) =>
                 b !== bulletIdx ? bullet : { ...bullet, text },
               ),
             },
@@ -276,34 +427,34 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
     );
   }
 
-  function toggleBulletIncluded(sectionIdx: number, bulletIdx: number) {
-    const previous = sections;
-    const next = sections.map((section, s) =>
-      s !== sectionIdx
-        ? section
+  function toggleBulletIncluded(groupIdx: number, bulletIdx: number) {
+    const previous = groups;
+    const next = groups.map((group, g) =>
+      g !== groupIdx
+        ? group
         : {
-            ...section,
-            bullets: section.bullets.map((bullet, b) => {
+            ...group,
+            bullets: group.bullets.map((bullet, b) => {
               if (b !== bulletIdx || bullet.unsupported) return bullet;
               return { ...bullet, included: !bullet.included };
             }),
           },
     );
-    setSections(next);
+    setGroups(next);
     // Optimistic — snap back to `previous` if the server rejects the save
     // (e.g. the exclude-all guard), so the checkbox never lies about what
     // is actually persisted.
     void persistEdits(next).then((ok) => {
-      if (!ok) setSections(previous);
+      if (!ok) setGroups(previous);
     });
   }
 
   async function handleDownload() {
-    if (summary === null) return;
+    if (summary === null || source === null || contactBlocked) return;
     setDownloading(true);
     setDownloadError(null);
     try {
-      const payload = toTailorPayload(summary, skills, sections);
+      const payload = toTailorPayload(source, summary, skills, groups);
       const res = await fetch(`/api/jobs/${jobId}/pdf`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -314,6 +465,9 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
       });
       if (!res.ok) {
         setDownloadError(await parseErrorBody(res));
+        // 422 is the contact gate — re-read the profile so the banner appears
+        // (or updates) rather than leaving the user with a bare error line.
+        if (res.status === 422) void refreshContact();
         return;
       }
       const blob = await res.blob();
@@ -359,6 +513,31 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
 
   return (
     <div className="flex flex-col gap-4">
+      {contactBlocked && (
+        <div
+          role="alert"
+          data-testid="contact-blocked"
+          className="flex gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm"
+        >
+          <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
+          <div className="flex flex-col gap-1">
+            <p className="font-medium text-destructive">
+              Resume downloads are blocked — your contact info isn&apos;t real yet.
+            </p>
+            <ul className="list-disc pl-4 text-muted-foreground">
+              {contactProblems?.map((problem, i) => (
+                <li key={`${problem.field}-${i}`}>{problem.message}</li>
+              ))}
+            </ul>
+            <p>
+              <Link href="/settings" className="font-medium underline underline-offset-2">
+                Fix it in Settings → Resume contact info
+              </Link>
+            </p>
+          </div>
+        </div>
+      )}
+
       {!generated && (
         <div className="flex flex-col gap-2">
           <p className="text-sm text-muted-foreground">
@@ -401,11 +580,24 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
             </div>
           </div>
 
-          {sections.map((section, s) => (
-            <div key={s} className="flex flex-col gap-2">
-              <h3 className="text-sm font-semibold">{section.heading}</h3>
+          {groups.map((group, g) => (
+            <div key={`${group.kind}-${group.index}`} className="flex flex-col gap-2">
+              {/* The block label is printed once per run of same-labelled
+                  groups, so five Experience entries read as one Experience
+                  block with five employers under it, not five headings. */}
+              {(g === 0 || groups[g - 1].label !== group.label) && (
+                <h3 className="text-sm font-semibold">{group.label}</h3>
+              )}
+              {(group.title || group.subtitle) && (
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  {group.title && <span className="text-sm font-medium">{group.title}</span>}
+                  {group.subtitle && (
+                    <span className="text-xs text-muted-foreground">{group.subtitle}</span>
+                  )}
+                </div>
+              )}
               <div className="flex flex-col gap-2">
-                {section.bullets.map((bullet, b) => (
+                {group.bullets.map((bullet, b) => (
                   <div
                     key={bullet.path}
                     className={`flex flex-col gap-1.5 rounded-lg border p-2.5 ${
@@ -417,7 +609,7 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
                         type="checkbox"
                         checked={bullet.included}
                         disabled={bullet.unsupported}
-                        onChange={() => toggleBulletIncluded(s, b)}
+                        onChange={() => toggleBulletIncluded(g, b)}
                         className="mt-1.5"
                         aria-label={
                           bullet.unsupported
@@ -427,8 +619,8 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
                       />
                       <Textarea
                         value={bullet.text}
-                        onChange={(event) => updateBulletText(s, b, event.target.value)}
-                        onBlur={() => void persistEdits(sections)}
+                        onChange={(event) => updateBulletText(g, b, event.target.value)}
+                        onBlur={() => void persistEdits(groups)}
                         rows={2}
                         className="flex-1"
                       />
@@ -446,7 +638,16 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
           ))}
 
           <div className="flex flex-wrap items-center gap-3 border-t pt-3">
-            <Button variant="outline" onClick={handleDownload} disabled={downloading}>
+            <Button
+              variant="outline"
+              onClick={handleDownload}
+              disabled={downloading || contactBlocked}
+              title={
+                contactBlocked
+                  ? "Add real contact info in Settings before downloading a resume."
+                  : undefined
+              }
+            >
               {downloading ? "Preparing PDF…" : "Download PDF"}
             </Button>
             <Button onClick={handleMarkApplied} disabled={marking}>

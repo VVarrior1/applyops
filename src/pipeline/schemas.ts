@@ -125,7 +125,7 @@ export const ExtractFactsOutput = z.object({
           .string()
           .min(1)
           .describe(
-            "Self-contained sentence, at most 30 words, naming the employer or project it belongs to.",
+            "Self-contained sentence, at most 30 words, naming the employer or project it belongs to — and, for a job, its title, location and dates exactly as the resume writes them (they become the entry header on the tailored resume).",
           ),
         evidence_span: z
           .string()
@@ -201,8 +201,64 @@ export type FitOutput = z.infer<typeof FitOutput>;
 // ---------------------------------------------------------------------------
 
 /**
- * ### `projects` — restoring v1's shape
+ * One employer/role a group of bullets hangs under — the header line v1's
+ * `\resumeSubheading{Mercor}{November 2025 -- Present}{Software Engineering
+ * Expert}{Remote}` renders, expressed as data.
  *
+ * Only `organization` and `bullets` are required. Everything else is a plain
+ * (possibly empty) string rather than an optional field on purpose: a model
+ * asked for `role` will answer honestly with `""` when no fact names one,
+ * whereas a *missing* field is indistinguishable from a field the model
+ * forgot, and an omitted-vs-empty distinction is exactly the kind of gap an
+ * invented job title fills. The renderer skips empty parts.
+ *
+ * Every string here must be copied from the candidate's confirmed facts —
+ * `checkCitations()` can only police `bullets` (they carry `fact_ids`), so
+ * the prompt carries the rule for the header fields and the extract step is
+ * what puts employers, titles and dates into the facts in the first place.
+ */
+export const ResumeEntry = z.object({
+  organization: z
+    .string()
+    .min(1)
+    .describe(
+      "Employer, client or organization name, written exactly as the facts write it. Never invent one.",
+    ),
+  role: z
+    .string()
+    .describe("Job title held there, from the facts. Empty string if no fact names one."),
+  location: z
+    .string()
+    .describe(
+      "City and region, or 'Remote', from the facts. Empty string if no fact names one.",
+    ),
+  start: z
+    .string()
+    .describe(
+      "Start date exactly as the facts write it, e.g. 'June 2025'. Empty string if no fact gives one.",
+    ),
+  end: z
+    .string()
+    .describe(
+      "End date, or 'Present' for a current role. Empty string if no fact gives one.",
+    ),
+  bullets: z
+    .array(CitedBullet)
+    .describe("1 to 3 bullets about this role, most relevant to the posting first."),
+});
+export type ResumeEntry = z.infer<typeof ResumeEntry>;
+
+/**
+ * ### `experience` and `projects` — restoring v1's shape
+ *
+ * A resume without employers is not a resume. The first cut of this schema
+ * had only a flat `sections: [{heading, bullets}]` list, so EXPERIENCE
+ * rendered as anonymous bullets — no company, no job title, no dates — and
+ * no ATS could parse an employment history out of the PDF. `experience`
+ * restores the entry header (see {@link ResumeEntry}); `projects` does the
+ * same for the projects block.
+ *
+
  * v1's tailored output named the candidate's *existing* projects
  * (`selected_projects: {name, technologies, tailored_description}`) so the
  * LaTeX pipeline could keep, reorder and re-bullet the real projects already
@@ -211,13 +267,18 @@ export type FitOutput = z.infer<typeof FitOutput>;
  * *identity* of each project. `projects` puts it back, with ≤3 bullets each
  * (`src/pdf/latex.ts` renders one `\resumeItem` per bullet).
  *
- * It is `.optional()` rather than required for exactly one reason: `tailor`
- * generations written before this field existed are still in the database and
- * are re-parsed by this schema every time their PDF is downloaded
- * (`app/api/jobs/[id]/pdf/route.ts`). Making it required would turn every one
- * of those into a 400. The prompt (`prompts/tailor.v1.md`, now 1.1.0) asks for
- * it unconditionally, and `deriveProjectsFromSections()` in `src/pdf/latex.ts`
- * maps the legacy rows' loose "Projects" bullets back onto the real projects.
+ * Both are `.optional()` rather than required for exactly one reason: `tailor`
+ * generations written before these fields existed are still in the database
+ * and are re-parsed by this schema every time their PDF is downloaded
+ * (`app/api/jobs/[id]/pdf/route.ts`). Making either required would turn every
+ * one of those into a 400. The prompt (`prompts/tailor.v1.md`, now 1.2.0) asks
+ * for both unconditionally; a legacy row keeps rendering its loose
+ * `sections` bullets, and `deriveProjectsFromSections()` in `src/pdf/latex.ts`
+ * maps its "Projects" bullets back onto the real projects.
+ *
+ * `sections` survives as the escape hatch for everything that is neither a job
+ * nor a project (Leadership, Certifications, Publications) — and as the only
+ * shape a pre-1.2.0 generation has.
  */
 export const TailorOutput = z.object({
   summary: z
@@ -230,11 +291,22 @@ export const TailorOutput = z.object({
   sections: z
     .array(
       z.object({
-        heading: z.string().min(1).describe("e.g. Experience, Projects, Education"),
+        heading: z
+          .string()
+          .min(1)
+          .describe("e.g. Leadership, Certifications — never Experience, Projects or Education"),
         bullets: z.array(CitedBullet),
       }),
     )
-    .describe("2-4 sections ordered by relevance to the posting."),
+    .describe(
+      "0-2 EXTRA sections for material that is neither a job nor a project. Empty when `experience` and `projects` already cover the resume.",
+    ),
+  experience: z
+    .array(ResumeEntry)
+    .describe(
+      "The candidate's EXISTING jobs, most relevant to this posting first. One entry per employer/role the facts describe; never merge two, never invent one.",
+    )
+    .optional(),
   projects: z
     .array(
       z.object({

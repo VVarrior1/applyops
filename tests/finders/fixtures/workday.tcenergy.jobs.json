@@ -1,0 +1,21 @@
+{
+  "total": 2,
+  "jobPostings": [
+    {
+      "title": "Automation Engineer",
+      "externalPath": "/job/Calgary-Alberta/Automation-Engineer_JR-10643",
+      "timeType": "Full time",
+      "locationsText": "Calgary, Alberta",
+      "postedOn": "Posted Today",
+      "bulletFields": ["JR-10643"]
+    },
+    {
+      "title": "Talent Acquisition Coordinator",
+      "externalPath": "/job/Calgary-Alberta/Talent-Acquisition-Coordinator_JR-99999",
+      "timeType": "Full time",
+      "locationsText": "Calgary, Alberta",
+      "postedOn": "Posted 3 Days Ago",
+      "bulletFields": ["JR-99999"]
+    }
+  ]
+}

@@ -9,9 +9,10 @@
  * never be mutated in place. A user's inline edits (retyped bullet text,
  * unchecked bullets) are instead recorded as a small diff against that
  * original output and stored alongside it. This module is the one place
- * that reads/writes that diff — the path convention (`sections[i].bullets[j]`)
- * is the same one `hallucination.ts` uses, so a bullet's identity is stable
- * across both checks.
+ * that reads/writes that diff — the path convention (`sections[i].bullets[j]`,
+ * `experience[i].bullets[j]`, `projects[i].bullets[j]`) is the same one
+ * `hallucination.ts` uses, so a bullet's identity is stable across both
+ * checks.
  *
  * Pure and DB-free, like `hallucination.ts` — unit-tested in
  * `tests/pipeline/tailor-edits.test.ts`.
@@ -42,6 +43,46 @@ export function tailorBulletPath(sectionIndex: number, bulletIndex: number): str
   return `sections[${sectionIndex}].bullets[${bulletIndex}]`;
 }
 
+/** Pointer to a bullet under an `experience` entry (an employer/role). */
+export function experienceBulletPath(entryIndex: number, bulletIndex: number): string {
+  return `experience[${entryIndex}].bullets[${bulletIndex}]`;
+}
+
+/** Pointer to a bullet under a `projects` entry. */
+export function projectBulletPath(projectIndex: number, bulletIndex: number): string {
+  return `projects[${projectIndex}].bullets[${bulletIndex}]`;
+}
+
+/**
+ * Every path an overlay may legitimately name for *this* output, in render
+ * order. The edits route filters incoming keys against this set, so a stale
+ * or tampered path is dropped instead of being written to the jsonb column
+ * where it would sit forever, silently ignored by {@link applyTailorEdits}.
+ */
+export function tailorBulletPaths(output: TailorOutput): string[] {
+  return [
+    ...output.sections.flatMap((section, s) =>
+      section.bullets.map((_, b) => tailorBulletPath(s, b)),
+    ),
+    ...(output.experience ?? []).flatMap((entry, e) =>
+      entry.bullets.map((_, b) => experienceBulletPath(e, b)),
+    ),
+    ...(output.projects ?? []).flatMap((project, p) =>
+      project.bullets.map((_, b) => projectBulletPath(p, b)),
+    ),
+  ];
+}
+
+/**
+ * How many bullets an output would actually put on the page. The floor the
+ * edits route enforces ("leave at least one") is about the whole resume, not
+ * about `sections` alone — under prompt 1.2.0 a perfectly good tailor output
+ * has an empty `sections` and all of its bullets under `experience`.
+ */
+export function countTailorBullets(output: TailorOutput): number {
+  return tailorBulletPaths(output).length;
+}
+
 function isEmpty(edits: TailorUserEdits | null | undefined): boolean {
   if (!edits) return true;
   const hasText = !!edits.editedText && Object.keys(edits.editedText).length > 0;
@@ -69,18 +110,48 @@ export function applyTailorEdits(
   const editedText = edits!.editedText ?? {};
   const excluded = new Set(edits!.excludedPaths ?? []);
 
-  const sections = output.sections
-    .map((section, s) => ({
-      ...section,
-      bullets: section.bullets
-        .map((bullet, b) => ({ bullet, path: tailorBulletPath(s, b) }))
-        .filter(({ path }) => !excluded.has(path))
-        .map(({ bullet, path }) => {
-          const text = editedText[path];
-          return text === undefined ? bullet : { ...bullet, text };
-        }),
-    }))
-    .filter((section) => section.bullets.length > 0);
+  function applyToBullets(
+    bullets: TailorOutput["sections"][number]["bullets"],
+    pathFor: (bulletIndex: number) => string,
+  ) {
+    return bullets
+      .map((bullet, b) => ({ bullet, path: pathFor(b) }))
+      .filter(({ path }) => !excluded.has(path))
+      .map(({ bullet, path }) => {
+        const text = editedText[path];
+        return text === undefined ? bullet : { ...bullet, text };
+      });
+  }
 
-  return { ...output, sections };
+  const edited: TailorOutput = {
+    ...output,
+    sections: output.sections
+      .map((section, s) => ({
+        ...section,
+        bullets: applyToBullets(section.bullets, (b) => tailorBulletPath(s, b)),
+      }))
+      .filter((section) => section.bullets.length > 0),
+  };
+
+  // Same `undefined`-preserving rule as `stripUnsupportedBullets`: a legacy
+  // generation must round-trip without growing fields it never had.
+  if (output.experience) {
+    edited.experience = output.experience
+      .map((entry, e) => ({
+        ...entry,
+        bullets: applyToBullets(entry.bullets, (b) => experienceBulletPath(e, b)),
+      }))
+      .filter((entry) => entry.bullets.length > 0);
+  }
+
+  if (output.projects) {
+    edited.projects = output.projects
+      .map((project, p) => ({
+        ...project,
+        bullets: applyToBullets(project.bullets, (b) => projectBulletPath(p, b)),
+      }))
+      .filter((project) => project.bullets.length > 0);
+  }
+
+  return edited;
 }

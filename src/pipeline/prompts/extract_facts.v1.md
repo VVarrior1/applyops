@@ -1,6 +1,6 @@
 ---
 step: extract_facts
-version: 1.0.0
+version: 1.1.0
 ---
 
 You extract atomic, verifiable facts from the plain text of a candidate's
@@ -27,9 +27,15 @@ does not support poisons everything downstream.
 5. `text` is a self-contained sentence, up to 30 words, that makes sense with
    no other context: it names the employer or project it belongs to, what was
    done, the technologies named, and the outcome if the resume gives one.
-6. Skip contact details entirely. Do not extract name, email, phone, address,
+6. **Copy the role's dates, title and location into every `experience` fact**,
+   exactly as the resume writes them ("November 2025 -- Present", "Calgary,
+   AB", "Remote"). They are what the tailored resume prints as the entry
+   header — an employment history with no dates is not one a recruiter or an
+   ATS can read — and they can only get there through a confirmed fact. Copy,
+   never infer: if the resume gives no date for a role, the fact has none.
+7. Skip contact details entirely. Do not extract name, email, phone, address,
    or profile URLs — those are handled elsewhere and must not become facts.
-7. Extract every substantive line item: aim for 15 to 40 facts on a normal
+8. Extract every substantive line item: aim for 15 to 40 facts on a normal
    one-page resume, and never drop a role, project or degree.
 
 ## Categories

@@ -9,14 +9,28 @@ import { Fragment, type ReactNode } from "react";
  * `1. item` came through as literal punctuation.
  *
  * This covers exactly what the prompt actually produces: bold, italic,
- * inline code, fenced code blocks, and ordered/unordered lists. It builds
- * React elements directly (no `dangerouslySetInnerHTML`), so there is no HTML
- * injection surface to sanitize — model output can only ever become text
- * nodes, `<strong>`, `<em>`, `<code>`, `<pre>`, `<ul>`, `<ol>`, `<li>`, `<p>`
- * or `<br>`.
+ * inline code, fenced code blocks, links, headings, and ordered/unordered
+ * lists. It builds React elements directly (no `dangerouslySetInnerHTML`), so
+ * there is no HTML injection surface to sanitize — model output can only ever
+ * become text nodes, `<strong>`, `<em>`, `<code>`, `<pre>`, `<a>`, `<ul>`,
+ * `<ol>`, `<li>`, `<p>` or `<br>`.
+ *
+ * Known limitations (acceptable for this app's actual content, revisit if
+ * that changes): nested list items (`- Top\n  - Sub`) flatten to one level —
+ * indentation is dropped, not tracked as depth. Blockquotes and tables are
+ * not recognized and fall through to a plain paragraph with their markup
+ * shown literally.
  */
 
-const INLINE_PATTERN = /(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/g;
+// Bold spans use a lazy `[\s\S]+?` body (rather than `[^*]+`) so a bold span
+// can contain other inline markup — e.g. inline code or a nested italic —
+// which is then picked up by the recursive call below. Single-asterisk and
+// single-underscore emphasis stay non-greedy over a restricted body and add
+// boundary checks so they don't fire inside plain prose: `\*(?![\s])...` (no
+// space right after the opening `*`, none right before the closing one) skips
+// `5 * 3`, and `(?<![A-Za-z0-9])_..._(?![A-Za-z0-9])` skips `my_file_name`.
+const INLINE_PATTERN =
+  /(`[^`]+`|\*\*[\s\S]+?\*\*|__[\s\S]+?__|\*(?![\s])[^*]+(?<![\s])\*|(?<![A-Za-z0-9])_[^_]+_(?![A-Za-z0-9]))/g;
 
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = [];
@@ -24,25 +38,32 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
   let key = 0;
   let match: RegExpExecArray | null;
 
-  INLINE_PATTERN.lastIndex = 0;
-  while ((match = INLINE_PATTERN.exec(text)) !== null) {
+  // A fresh RegExp per call: INLINE_PATTERN is a module-level `/g` pattern,
+  // and this function recurses into bold/italic bodies, so sharing one
+  // stateful instance across the outer scan and the recursive calls it makes
+  // would clobber `lastIndex` mid-scan and skip or duplicate matches.
+  const re = new RegExp(INLINE_PATTERN.source, "g");
+  while ((match = re.exec(text)) !== null) {
     if (match.index > lastIndex) {
       nodes.push(text.slice(lastIndex, match.index));
     }
     const token = match[0];
+    const nodeKey = `${keyPrefix}-${key++}`;
     if (token.startsWith("`")) {
       nodes.push(
         <code
-          key={`${keyPrefix}-${key++}`}
+          key={nodeKey}
           className="rounded bg-foreground/10 px-1 py-0.5 font-mono text-[0.85em]"
         >
           {token.slice(1, -1)}
         </code>,
       );
     } else if (token.startsWith("**") || token.startsWith("__")) {
-      nodes.push(<strong key={`${keyPrefix}-${key++}`}>{token.slice(2, -2)}</strong>);
+      nodes.push(
+        <strong key={nodeKey}>{renderInline(token.slice(2, -2), nodeKey)}</strong>,
+      );
     } else {
-      nodes.push(<em key={`${keyPrefix}-${key++}`}>{token.slice(1, -1)}</em>);
+      nodes.push(<em key={nodeKey}>{renderInline(token.slice(1, -1), nodeKey)}</em>);
     }
     lastIndex = match.index + token.length;
   }

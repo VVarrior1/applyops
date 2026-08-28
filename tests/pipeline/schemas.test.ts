@@ -62,6 +62,58 @@ describe("TailorOutput", () => {
     expect(parsed.projects).toBeUndefined();
   });
 
+  it("accepts the v1-parity `experience` entries", () => {
+    const parsed = TailorOutput.parse({
+      ...valid,
+      experience: [
+        {
+          organization: "City of Calgary",
+          role: "Software Engineer (Capstone Project)",
+          location: "Calgary, AB",
+          start: "September 2025",
+          end: "Present",
+          bullets: [{ text: "Built a pipeline", fact_ids: ["F-004"] }],
+        },
+      ],
+    });
+    expect(parsed.experience?.[0].organization).toBe("City of Calgary");
+    expect(parsed.experience?.[0].end).toBe("Present");
+  });
+
+  it("accepts empty header fields — an unknown title is honest, a guessed one is not", () => {
+    const parsed = TailorOutput.parse({
+      ...valid,
+      experience: [
+        {
+          organization: "A Startup",
+          role: "",
+          location: "",
+          start: "",
+          end: "",
+          bullets: [{ text: "Built a pipeline", fact_ids: ["F-004"] }],
+        },
+      ],
+    });
+    expect(parsed.experience?.[0].role).toBe("");
+  });
+
+  it("rejects an experience entry with no organization", () => {
+    const result = TailorOutput.safeParse({
+      ...valid,
+      experience: [{ organization: "", role: "", location: "", start: "", end: "", bullets: [] }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("still parses a stored output written before `experience` existed", () => {
+    expect(TailorOutput.parse(valid).experience).toBeUndefined();
+  });
+
+  it("accepts an empty `sections` list — since 1.2.0 the bullets live in the entries", () => {
+    const parsed = TailorOutput.parse({ ...valid, sections: [] });
+    expect(parsed.sections).toEqual([]);
+  });
+
   it("accepts the v1-parity `projects` list", () => {
     const parsed = TailorOutput.parse({
       ...valid,

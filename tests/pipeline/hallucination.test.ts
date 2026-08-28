@@ -228,3 +228,71 @@ describe("checkCitations — tailor `projects` bullets", () => {
     expect(stripped.projects).toBeUndefined();
   });
 });
+
+/**
+ * `TailorOutput.experience` (the employer/role entries the PDF's EXPERIENCE
+ * block is built from) has to go through the same gate as `sections` and
+ * `projects`, or a fabricated bullet under a real employer would reach a PDF
+ * uncited — the worst version of this failure, since it reads as employment
+ * history rather than as a claim.
+ */
+describe("checkCitations — tailor `experience` bullets", () => {
+  function withExperience(): TailorOutput {
+    return {
+      ...tailorFixture(),
+      sections: [],
+      experience: [
+        {
+          organization: "City of Calgary",
+          role: "Software Engineer",
+          location: "Calgary, AB",
+          start: "September 2025",
+          end: "Present",
+          bullets: [
+            { text: "real", fact_ids: ["F-001"] },
+            { text: "invented", fact_ids: ["F-404"] },
+          ],
+        },
+        {
+          organization: "Ghost Employer",
+          role: "",
+          location: "",
+          start: "",
+          end: "",
+          bullets: [{ text: "uncited", fact_ids: [] }],
+        },
+      ],
+    };
+  }
+
+  const report = checkCitations(withExperience(), validLabels);
+
+  it("counts an experience bullet as a claim", () => {
+    expect(report.totalClaims).toBe(3);
+  });
+
+  it("flags experience bullets by an experience[]-rooted path", () => {
+    expect(blockedPaths(report)).toEqual([
+      "experience[0].bullets[1]",
+      "experience[1].bullets[0]",
+    ]);
+  });
+
+  it("strips the blocked bullets and drops an employer left with none", () => {
+    const stripped = stripUnsupportedBullets(withExperience(), report);
+    expect(stripped.experience).toHaveLength(1);
+    expect(stripped.experience?.[0].organization).toBe("City of Calgary");
+    expect(stripped.experience?.[0].bullets.map((b) => b.text)).toEqual(["real"]);
+    // The header fields survive the strip — only bullets are filtered.
+    expect(stripped.experience?.[0].start).toBe("September 2025");
+  });
+
+  it("leaves an output with no `experience` field untouched", () => {
+    const original = tailorFixture();
+    const stripped = stripUnsupportedBullets(
+      original,
+      checkCitations(original, validLabels),
+    );
+    expect(stripped.experience).toBeUndefined();
+  });
+});

@@ -4,7 +4,12 @@ import { z } from "zod";
 import { requireUser } from "@/src/auth/require";
 import { getDb } from "@/src/db/client";
 import { generations } from "@/src/db/schema";
-import { applyTailorEdits, tailorBulletPath, type TailorUserEdits } from "@/src/pipeline/tailor-edits";
+import {
+  applyTailorEdits,
+  countTailorBullets,
+  tailorBulletPaths,
+  type TailorUserEdits,
+} from "@/src/pipeline/tailor-edits";
 import { TailorOutput } from "@/src/pipeline/schemas";
 
 // A real resume bullet is a line or two; a real tailor output is a handful
@@ -75,15 +80,14 @@ export async function PATCH(
     return NextResponse.json({ error: "That generation's output is malformed." }, { status: 500 });
   }
 
-  // The only paths that can legitimately mean anything: `sections[i].bullets[j]`
-  // for a real (section, bullet) pair in *this* generation's actual output.
-  // A key/path outside that set (stale, tampered, or referring to a bullet
-  // that never existed) is dropped rather than stored — it would otherwise
-  // land in the jsonb column unchanged and just sit there silently ignored
-  // by `applyTailorEdits`.
-  const validPaths = new Set(
-    output.data.sections.flatMap((section, s) => section.bullets.map((_, b) => tailorBulletPath(s, b))),
-  );
+  // The only paths that can legitimately mean anything: a real (container,
+  // bullet) pair in *this* generation's actual output — under `sections`,
+  // `experience` or `projects` (`tailorBulletPaths`). A key/path outside
+  // that set (stale, tampered, or referring to a bullet that never existed)
+  // is dropped rather than stored — it would otherwise land in the jsonb
+  // column unchanged and just sit there silently ignored by
+  // `applyTailorEdits`.
+  const validPaths = new Set(tailorBulletPaths(output.data));
   const sanitizedUserEdits: TailorUserEdits = {
     editedText: Object.fromEntries(
       Object.entries(userEdits.editedText ?? {}).filter(([path]) => validPaths.has(path)),
@@ -95,8 +99,12 @@ export async function PATCH(
   // floor `stripUnsupportedBullets` implicitly enforces for hallucination
   // exclusions (an empty resume was never a state the pipeline could
   // reach); here it's a user-editable state, so it needs an explicit check.
+  // Counted across the whole output, not just `sections`: since prompt
+  // 1.2.0 a perfectly good tailor output has an empty `sections` and every
+  // bullet under `experience`/`projects`, and checking `sections` alone
+  // would reject that user's very first edit.
   const effective = applyTailorEdits(output.data, sanitizedUserEdits);
-  if (effective.sections.length === 0) {
+  if (countTailorBullets(effective) === 0) {
     return NextResponse.json(
       { error: "That would exclude every bullet — leave at least one." },
       { status: 400 },
