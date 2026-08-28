@@ -38,25 +38,38 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link href="/settings" className="shrink-0 text-sm font-semibold tracking-tight">
             ApplyOps
           </Link>
-          <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm">
-            {NAV_ITEMS.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="shrink-0 rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                {item.label}
-              </Link>
-            ))}
-            {isOwner && (
-              <Link
-                href="/evals"
-                className="shrink-0 rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                Evals
-              </Link>
-            )}
-          </nav>
+          <div className="relative min-w-0 flex-1">
+            <nav className="flex items-center gap-1 overflow-x-auto text-sm">
+              {NAV_ITEMS.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="shrink-0 rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  {item.label}
+                </Link>
+              ))}
+              {isOwner && (
+                <Link
+                  href="/evals"
+                  className="shrink-0 rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  Evals
+                </Link>
+              )}
+            </nav>
+            {/*
+             * The nav scrolls horizontally when it doesn't fit (mobile, and
+             * the owner-only extra "Evals" item), but a bare
+             * `overflow-x-auto` renders no scrollbar on touch browsers and no
+             * other cue that there's more to the right. This fade is the
+             * visual affordance that off-screen items exist; it's
+             * `pointer-events-none` so it never blocks a tap on the link
+             * underneath, and it uses `from-card` to blend into the header's
+             * own background rather than the page background.
+             */}
+            <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-card to-transparent" />
+          </div>
           <span className="hidden shrink-0 text-sm text-muted-foreground sm:inline">
             {user.email}
           </span>

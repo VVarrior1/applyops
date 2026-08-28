@@ -155,7 +155,11 @@ export function GuideView({
               </h4>
               <div className="flex flex-wrap gap-1.5">
                 {guide.realistic_targets.role_types.map((role) => (
-                  <Badge key={role} variant="secondary">
+                  <Badge
+                    key={role}
+                    variant="secondary"
+                    className="h-auto max-w-full whitespace-normal text-left"
+                  >
                     {role}
                   </Badge>
                 ))}
@@ -167,7 +171,11 @@ export function GuideView({
               </h4>
               <div className="flex flex-wrap gap-1.5">
                 {guide.realistic_targets.company_types.map((company) => (
-                  <Badge key={company} variant="outline">
+                  <Badge
+                    key={company}
+                    variant="outline"
+                    className="h-auto max-w-full whitespace-normal text-left"
+                  >
                     {company}
                   </Badge>
                 ))}

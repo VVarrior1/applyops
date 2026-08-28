@@ -74,7 +74,7 @@ export function GuideWorkspace({
   }
 
   return (
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start">
+    <div className="grid gap-8 grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start">
       <GuideView
         guide={guide}
         generatedAt={generatedAt}
