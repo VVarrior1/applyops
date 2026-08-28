@@ -8,7 +8,7 @@ import { COUNTRY_OPTIONS } from "@/src/finders/country";
 import { DEFAULT_MODEL_BY_STEP } from "@/src/llm/defaults";
 import type { SearchPrefsRow } from "@/src/profile/facts";
 import { getPrefs } from "@/src/profile/facts";
-import { countryOverlapCondition, countryUnknownCondition, countsAsApplied, lacksUsAuth } from "@/src/rank/candidates";
+import { appliedJobIds as deriveAppliedJobIds, countryOverlapCondition, countryUnknownCondition, lacksUsAuth } from "@/src/rank/candidates";
 import { fitRankerVersion, KEYWORD_RANKER_VERSION } from "@/src/rank/rank";
 import { roleTitlePatternSource } from "@/src/rank/role-titles";
 import { assessJob, type VerdictInput } from "@/src/rank/verdict";
@@ -181,9 +181,7 @@ export default async function JobsPage({
   // Withdrawn (and still-draft) applications must not permanently hide the
   // job or trip assessJob's "already applied" blocker — see
   // countsAsApplied's doc comment (src/rank/candidates.ts).
-  const appliedJobIds = new Set(
-    appliedRows.filter((r) => countsAsApplied(r.status)).map((r) => r.jobId),
-  );
+  const appliedJobIds = deriveAppliedJobIds(appliedRows);
 
   const userCountryCodes = prefs?.countries ?? [];
   const userCountryOptions = userCountryCodes

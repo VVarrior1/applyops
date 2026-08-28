@@ -81,6 +81,20 @@ export function countsAsApplied(status: string): boolean {
 }
 
 /**
+ * `applications` rows for one user → the set of `jobId`s that count as
+ * applied ({@link countsAsApplied}), i.e. must be hidden/blocked. Pulled out
+ * of `app/(app)/jobs/page.tsx`'s `appliedJobIds` derivation so the actual
+ * regression this guards against (a call site treating any row — including
+ * a withdrawn one — as "applied") is covered by a unit test instead of only
+ * by a manual repro against the rendered page.
+ */
+export function appliedJobIds<T extends { jobId: string; status: string }>(
+  appliedRows: readonly T[],
+): Set<string> {
+  return new Set(appliedRows.filter((row) => countsAsApplied(row.status)).map((row) => row.jobId));
+}
+
+/**
  * The three candidate-narrowing conditions (spec items 3a–3c), included only
  * when they'd actually narrow anything:
  *

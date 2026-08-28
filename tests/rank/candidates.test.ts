@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
+  appliedJobIds,
   CANDIDATE_STALE_AFTER_DAYS,
   candidateConditions,
   countryOverlapCondition,
@@ -90,5 +91,40 @@ describe("countsAsApplied", () => {
     for (const status of ["applied", "responded", "interviewing", "offer", "rejected", "ghosted"]) {
       expect(countsAsApplied(status)).toBe(true);
     }
+  });
+});
+
+describe("appliedJobIds", () => {
+  // Covers the actual call sites the original regression lived in —
+  // app/(app)/jobs/page.tsx's appliedJobIds (feeding both the notInArray
+  // exclusion and each row's alreadyApplied) — rather than only the pure
+  // countsAsApplied helper.
+  it("excludes a job whose only applications row is withdrawn", () => {
+    const rows = [{ jobId: "job-1", status: "withdrawn" }];
+    expect(appliedJobIds(rows)).toEqual(new Set());
+  });
+
+  it("excludes a job whose only applications row is still draft", () => {
+    const rows = [{ jobId: "job-1", status: "draft" }];
+    expect(appliedJobIds(rows)).toEqual(new Set());
+  });
+
+  it("includes a job whose applications row is rejected — that still counts as applied", () => {
+    const rows = [{ jobId: "job-1", status: "rejected" }];
+    expect(appliedJobIds(rows)).toEqual(new Set(["job-1"]));
+  });
+
+  it("handles a mix of jobs across statuses independently", () => {
+    const rows = [
+      { jobId: "job-applied", status: "applied" },
+      { jobId: "job-withdrawn", status: "withdrawn" },
+      { jobId: "job-rejected", status: "rejected" },
+      { jobId: "job-draft", status: "draft" },
+    ];
+    expect(appliedJobIds(rows)).toEqual(new Set(["job-applied", "job-rejected"]));
+  });
+
+  it("returns an empty set for no rows", () => {
+    expect(appliedJobIds([])).toEqual(new Set());
   });
 });

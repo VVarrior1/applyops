@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { requireUser } from "@/src/auth/require";
+import { recordApplication } from "@/src/applications/record";
 import { getDb } from "@/src/db/client";
-import { applications, generations, jobs, outcomeEvents } from "@/src/db/schema";
+import { generations, jobs } from "@/src/db/schema";
 
 const bodySchema = z.object({
   jobId: z.string().uuid(),
@@ -52,35 +53,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const application = await db.transaction(async (tx) => {
-    // `onConflictDoNothing` against `applications_user_job_uq` (drizzle/0015
-    // — at most one application per user+job) instead of a plain insert:
-    // re-marking the same job as applied (a double-click, a retried
-    // request) is idempotent — it returns the existing application rather
-    // than erroring or creating a second row for the same job.
-    const [inserted] = await tx
-      .insert(applications)
-      .values({
-        userId: user.id,
-        jobId,
-        tailorGenerationId: tailorGenerationId ?? null,
-        status: "applied",
-      })
-      .onConflictDoNothing({ target: [applications.userId, applications.jobId] })
-      .returning({ id: applications.id });
-
-    if (inserted) {
-      await tx.insert(outcomeEvents).values({ applicationId: inserted.id, type: "applied" });
-      return { id: inserted.id, created: true as const };
-    }
-
-    const [existing] = await tx
-      .select({ id: applications.id })
-      .from(applications)
-      .where(and(eq(applications.userId, user.id), eq(applications.jobId, jobId)))
-      .limit(1);
-    return { id: existing.id, created: false as const };
-  });
+  const application = await recordApplication(db, { userId: user.id, jobId, tailorGenerationId });
 
   return NextResponse.json(
     { id: application.id },

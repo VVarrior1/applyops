@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { countsAsApplied } from "../../src/rank/candidates";
 import { assessJob, hardPreferenceConflict, type VerdictInput } from "../../src/rank/verdict";
 
 const NOW = new Date("2026-08-28T12:00:00Z");
@@ -78,6 +79,28 @@ describe("assessJob", () => {
 
   it("skips jobs already applied to", () => {
     expect(assessJob({ ...base, alreadyApplied: true }).verdict).toBe("skip");
+  });
+
+  it("derives alreadyApplied from the applications row set the way app/(app)/jobs/[id]/page.tsx does — withdrawn-only doesn't block, rejected still does", () => {
+    // Mirrors `appliedRows.some((row) => countsAsApplied(row.status))` from
+    // app/(app)/jobs/[id]/page.tsx: at most one `applications` row exists
+    // per user+job (applications_user_job_uq), but the derivation has to
+    // treat a withdrawn row as not-applied regardless of row count.
+    const withdrawnOnly = [{ status: "withdrawn" }];
+    const rejected = [{ status: "rejected" }];
+
+    const withdrawnVerdict = assessJob({
+      ...base,
+      alreadyApplied: withdrawnOnly.some((row) => countsAsApplied(row.status)),
+    });
+    expect(withdrawnVerdict.verdict).toBe("apply");
+
+    const rejectedVerdict = assessJob({
+      ...base,
+      alreadyApplied: rejected.some((row) => countsAsApplied(row.status)),
+    });
+    expect(rejectedVerdict.verdict).toBe("skip");
+    expect(rejectedVerdict.reasons.join(" ")).toMatch(/already applied/i);
   });
 
   it("orders reasons hard-blockers first and never duplicates", () => {

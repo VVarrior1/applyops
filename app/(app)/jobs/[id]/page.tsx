@@ -122,9 +122,11 @@ export default async function JobDetailPage({
         ),
       ),
     getPrefs(db, user.id),
-    // No `.limit(1)`: a user can withdraw and later re-apply, leaving more
-    // than one applications row for the same job — every one has to be
-    // checked against countsAsApplied, not just whichever comes back first.
+    // No `.limit(1)`: at most one applications row can exist per
+    // user+job (`applications_user_job_uq`, drizzle/0015) — a withdraw then
+    // re-apply reactivates that same row rather than creating a second one
+    // (see `POST /api/applications`). `.some()` below is a cheap defensive
+    // read over that (at-most-one-row) result, not a real multi-row scan.
     db
       .select({ id: applications.id, status: applications.status })
       .from(applications)
@@ -273,6 +275,7 @@ export default async function JobDetailPage({
           initialFit,
           initialFitStale,
           initialKeywordScore: keywordRow?.score ?? null,
+          initialVerdict: verdict,
         }}
         initialTailorGeneration={initialTailorGeneration}
         initialSuggestGeneration={initialSuggestGeneration}
