@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { applications, outcomeEvents } from "../../src/db/schema";
 import type { Db } from "../../src/db/client";
 import { ApplyError, applyToApplication, _internal } from "../../src/agent/run";
+import { buildApplicantData } from "../../src/agent/ats-fastpath";
 
 /**
  * The two safety-relevant behaviours of `src/agent/run.ts` that do not need a
@@ -72,6 +73,51 @@ describe("applyToApplication — guards before the browser opens", () => {
   it("refuses an application id that does not exist", async () => {
     const { db } = fakeDb([]);
     await expect(applyToApplication(db, "nope")).rejects.toThrow(/No application nope/);
+  });
+});
+
+describe("assertApplicable — the contact gate before the browser opens", () => {
+  const real = {
+    name: "Ada Lovelace",
+    email: "ada.lovelace@gmail.com",
+    phone: "(587) 891-6940",
+    links: ["https://github.com/adalovelace"],
+  };
+  const dataFor = (contact: Record<string, unknown>) =>
+    buildApplicantData({ contact: contact as never, prefs: null });
+
+  it("lets a real contact block through", () => {
+    expect(() => _internal.assertApplicable(dataFor(real), real as never)).not.toThrow();
+  });
+
+  it("still reports a missing name or email first", () => {
+    const noEmail = { ...real, email: "" };
+    expect(() => _internal.assertApplicable(dataFor(noEmail), noEmail as never)).toThrow(
+      /Profile is missing email/,
+    );
+  });
+
+  /**
+   * The QA row itself. This path *submits* to a real employer, so placeholder
+   * identity has to fail before Playwright launches — not get typed into a
+   * form and clicked through.
+   */
+  it("refuses the seed identity QA found in the owner's row", () => {
+    const seed = {
+      name: "ApplyOps Test Resume",
+      email: "candidate@example.com",
+      phone: "555-0100",
+      links: ["github.com/example-candidate"],
+    };
+    expect(() => _internal.assertApplicable(dataFor(seed), seed as never)).toThrow(ApplyError);
+    expect(() => _internal.assertApplicable(dataFor(seed), seed as never)).toThrow(
+      /placeholder|aren't application-ready/i,
+    );
+  });
+
+  it("refuses a placeholder that hides behind a real-looking name", () => {
+    const sneaky = { ...real, email: "candidate@example.com" };
+    expect(() => _internal.assertApplicable(dataFor(sneaky), sneaky as never)).toThrow(ApplyError);
   });
 });
 

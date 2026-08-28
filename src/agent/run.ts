@@ -37,6 +37,7 @@ import {
 } from "../db/schema";
 import type { ModelId } from "../llm/model-id";
 import { RESUME_BUCKET, getStorageAdminClient } from "../profile/storage";
+import { checkContact } from "../profile/contact";
 import {
   buildApplicantData,
   detectAts,
@@ -110,7 +111,7 @@ export async function applyToApplication(
   const row = await loadApplication(db, applicationId);
   const ats = detectAts(row.jobUrl);
   const data = buildApplicantData({ contact: row.contact, prefs: row.prefs });
-  assertApplicable(data);
+  assertApplicable(data, row.contact);
 
   const resumePath = await materialiseResume(row.resumePdfPath, applicationId, log);
 
@@ -307,7 +308,7 @@ async function recordOutcome(db: Db, applicationId: string, status: ApplyStatus)
  * rule ("only `applied` writes anything") has to hold for the funnel in spec
  * §9 to mean anything, so it is reachable from tests without Playwright.
  */
-export const _internal = { recordOutcome };
+export const _internal = { recordOutcome, assertApplicable };
 
 // ---------------------------------------------------------------------------
 // Files
@@ -361,14 +362,39 @@ async function materialiseResume(
  * Refuse to open a browser at all when the profile cannot answer the questions
  * every application asks. Failing here costs nothing; failing halfway through
  * a form wastes a real submission slot at a real company.
+ *
+ * Presence is not enough — the values also have to be a real person
+ * (`checkContact`, `src/profile/contact.ts`). QA caught `profiles.contact`
+ * holding seed identity ("ApplyOps Test Resume", `candidate@example.com`,
+ * `555-0100`) and `POST /api/jobs/[id]/pdf` now refuses to render a PDF from
+ * it; this path is the same bug with a worse ending. A bad PDF sits in the
+ * user's Downloads folder until they notice, but this function's caller
+ * *submits* — it types those values into a real employer's ATS and clicks the
+ * button. There is no un-sending that, and no banner in the app can help
+ * afterwards, so the identical gate belongs here and it belongs before the
+ * browser opens.
  */
-function assertApplicable(data: ApplicantData): void {
+function assertApplicable(
+  data: ApplicantData,
+  contact: typeof profiles.$inferSelect.contact,
+): void {
   const missing: string[] = [];
   if (!data.fullName) missing.push("name");
   if (!data.email) missing.push("email");
   if (missing.length > 0) {
     throw new ApplyError(
       `Profile is missing ${missing.join(" and ")} — set them in Settings → Contact details before applying.`,
+    );
+  }
+
+  // Not `contactProblemSummary()`: that one closes with "then download
+  // again", which is the download route's remedy, not this one's.
+  const problems = checkContact(contact);
+  if (problems.length > 0) {
+    throw new ApplyError(
+      "Refusing to apply with contact details that aren't application-ready: " +
+        problems.map((problem) => problem.message).join(" ") +
+        " Fix them in Settings → Resume contact info before applying.",
     );
   }
 }
