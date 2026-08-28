@@ -3,6 +3,11 @@ import { requireOwner } from "@/src/auth/require";
 import { getDb } from "@/src/db/client";
 import { gradingProgress } from "@/src/eval/golden";
 import { Grader } from "@/components/evals/Grader";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Grade",
+};
 
 /**
  * `/evals/grade` — owner-only (spec §7: "this is the owner's one manual task").

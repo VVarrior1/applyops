@@ -18,6 +18,11 @@ import { FactsEditor } from "./facts-editor";
 import { BudgetEditor } from "./budget-editor";
 import { ContactEditor } from "./contact-editor";
 import { DeleteMyData } from "./delete-my-data";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Settings",
+};
 
 /**
  * Account overview, resume/facts editor, search prefs, budget (owner-only

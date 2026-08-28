@@ -29,7 +29,7 @@ import { getDb } from "@/src/db/client";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Model benchmark — ApplyOps",
+  title: "Model benchmark",
   description:
     "Mean judge score, hallucination rate, cost per item and latency for every model ApplyOps has benchmarked, per pipeline step.",
 };

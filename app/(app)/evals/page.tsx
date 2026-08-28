@@ -6,6 +6,11 @@ import { buttonVariants } from "@/components/ui/button";
 import { defaultModelForStep } from "@/src/llm/defaults";
 import { goldenSetSummary } from "@/src/eval/golden";
 import { listEvalRuns, type EvalRunListItem } from "@/src/eval/runner";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Evals",
+};
 
 /**
  * `/evals` — owner-only (spec §7). Every run the harness has ever recorded,

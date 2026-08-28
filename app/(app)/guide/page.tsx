@@ -3,6 +3,11 @@ import { getDb } from "@/src/db/client";
 import { GuideWorkspace } from "@/components/guide/GuideWorkspace";
 import { getLatestGuide, loadConversation } from "@/src/guide/store";
 import { getConfirmedFacts } from "@/src/profile/facts";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Guide",
+};
 
 /**
  * `/guide` — the personalized outlook and a chat that is grounded in the same

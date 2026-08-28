@@ -8,12 +8,17 @@ import { COUNTRY_OPTIONS } from "@/src/finders/country";
 import { DEFAULT_MODEL_BY_STEP } from "@/src/llm/defaults";
 import type { SearchPrefsRow } from "@/src/profile/facts";
 import { getPrefs } from "@/src/profile/facts";
-import { countryOverlapCondition, countryUnknownCondition, lacksUsAuth } from "@/src/rank/candidates";
+import { countryOverlapCondition, countryUnknownCondition, countsAsApplied, lacksUsAuth } from "@/src/rank/candidates";
 import { fitRankerVersion, KEYWORD_RANKER_VERSION } from "@/src/rank/rank";
 import { roleTitlePatternSource } from "@/src/rank/role-titles";
 import { assessJob, type VerdictInput } from "@/src/rank/verdict";
 import { JobFilters, type JobFiltersValue, type PostedFilter, type RolesFilter } from "@/components/jobs/JobFilters";
 import { JobList, type JobListItem } from "@/components/jobs/JobList";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Jobs",
+};
 
 /** Rows per page (build spec item 2 — replaces the old flat `LIMIT 200` browsing cap now that a true COUNT + `page` param make an unbounded page unnecessary). */
 const PAGE_SIZE = 50;
@@ -168,9 +173,17 @@ export default async function JobsPage({
 
   const [prefs, appliedRows] = await Promise.all([
     getPrefs(db, user.id),
-    db.select({ jobId: applications.jobId }).from(applications).where(eq(applications.userId, user.id)),
+    db
+      .select({ jobId: applications.jobId, status: applications.status })
+      .from(applications)
+      .where(eq(applications.userId, user.id)),
   ]);
-  const appliedJobIds = new Set(appliedRows.map((r) => r.jobId));
+  // Withdrawn (and still-draft) applications must not permanently hide the
+  // job or trip assessJob's "already applied" blocker — see
+  // countsAsApplied's doc comment (src/rank/candidates.ts).
+  const appliedJobIds = new Set(
+    appliedRows.filter((r) => countsAsApplied(r.status)).map((r) => r.jobId),
+  );
 
   const userCountryCodes = prefs?.countries ?? [];
   const userCountryOptions = userCountryCodes
@@ -247,70 +260,77 @@ export default async function JobsPage({
     conditions.push(notInArray(jobs.id, [...appliedJobIds]));
   }
 
-  const [countRows, rows] = await Promise.all([
-    db
-      .select({ total: sql<number>`count(*)` })
-      .from(jobs)
-      .leftJoin(companies, eq(jobs.companyId, companies.id))
-      .leftJoin(
-        fitScores,
-        and(
-          eq(fitScores.jobId, jobs.id),
-          eq(fitScores.userId, user.id),
-          eq(fitScores.rankerVersion, fitVersion),
-        ),
-      )
-      .where(and(...conditions)),
-    db
-      .select({
-        id: jobs.id,
-        title: jobs.title,
-        companyName: companies.name,
-        location: jobs.location,
-        remote: jobs.remote,
-        workAuthSignal: jobs.workAuthSignal,
-        postedAt: jobs.postedAt,
-        lastSeenAt: jobs.lastSeenAt,
-        active: jobs.active,
-        isEntryLevel: jobs.isEntryLevel,
-        isRelevantRole: jobs.isRelevantRole,
-        countries: jobs.countries,
-        analysis: jobs.analysis,
-        fitScore: fitScores.score,
-        keywordScore: kwScores.score,
-      })
-      .from(jobs)
-      .leftJoin(companies, eq(jobs.companyId, companies.id))
-      .leftJoin(
-        fitScores,
-        and(
-          eq(fitScores.jobId, jobs.id),
-          eq(fitScores.userId, user.id),
-          eq(fitScores.rankerVersion, fitVersion),
-        ),
-      )
-      .leftJoin(
-        kwScores,
-        and(
-          eq(kwScores.jobId, jobs.id),
-          eq(kwScores.userId, user.id),
-          eq(kwScores.rankerVersion, KEYWORD_RANKER_VERSION),
-        ),
-      )
-      .where(and(...conditions))
-      .orderBy(
-        // Every fit-scored row (any fit score, including 0) ahead of every
-        // keyword-only row, as a block — the two scales are not comparable
-        // directly (see the file header).
-        sql`(${fitScores.score} IS NOT NULL) DESC`,
-        sql`coalesce(${fitScores.score}, ${kwScores.score}) DESC NULLS LAST`,
-        sql`${jobs.postedAt} DESC NULLS LAST`,
-      )
-      .limit(PAGE_SIZE)
-      .offset((page - 1) * PAGE_SIZE),
-  ]);
+  // Count first, then clamp the page to what actually exists before running
+  // the offset query — a stale/typed-in `?page=` past the last page must
+  // render the last page (not an empty table with an arithmetically
+  // impossible "Showing 4901–101 of 101" header, QA finding "/jobs result
+  // count is arithmetically wrong").
+  const countRows = await db
+    .select({ total: sql<number>`count(*)` })
+    .from(jobs)
+    .leftJoin(companies, eq(jobs.companyId, companies.id))
+    .leftJoin(
+      fitScores,
+      and(
+        eq(fitScores.jobId, jobs.id),
+        eq(fitScores.userId, user.id),
+        eq(fitScores.rankerVersion, fitVersion),
+      ),
+    )
+    .where(and(...conditions));
 
   const total = Number(countRows[0]?.total ?? 0);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const effectivePage = Math.min(page, totalPages);
+
+  const rows = await db
+    .select({
+      id: jobs.id,
+      title: jobs.title,
+      companyName: companies.name,
+      location: jobs.location,
+      remote: jobs.remote,
+      workAuthSignal: jobs.workAuthSignal,
+      postedAt: jobs.postedAt,
+      lastSeenAt: jobs.lastSeenAt,
+      active: jobs.active,
+      isEntryLevel: jobs.isEntryLevel,
+      isRelevantRole: jobs.isRelevantRole,
+      countries: jobs.countries,
+      analysis: jobs.analysis,
+      fitScore: fitScores.score,
+      keywordScore: kwScores.score,
+    })
+    .from(jobs)
+    .leftJoin(companies, eq(jobs.companyId, companies.id))
+    .leftJoin(
+      fitScores,
+      and(
+        eq(fitScores.jobId, jobs.id),
+        eq(fitScores.userId, user.id),
+        eq(fitScores.rankerVersion, fitVersion),
+      ),
+    )
+    .leftJoin(
+      kwScores,
+      and(
+        eq(kwScores.jobId, jobs.id),
+        eq(kwScores.userId, user.id),
+        eq(kwScores.rankerVersion, KEYWORD_RANKER_VERSION),
+      ),
+    )
+    .where(and(...conditions))
+    .orderBy(
+      // Every fit-scored row (any fit score, including 0) ahead of every
+      // keyword-only row, as a block — the two scales are not comparable
+      // directly (see the file header).
+      sql`(${fitScores.score} IS NOT NULL) DESC`,
+      sql`coalesce(${fitScores.score}, ${kwScores.score}) DESC NULLS LAST`,
+      sql`${jobs.postedAt} DESC NULLS LAST`,
+    )
+    .limit(PAGE_SIZE)
+    .offset((effectivePage - 1) * PAGE_SIZE);
+
   const verdictPrefs = toVerdictPrefs(prefs);
 
   const allItems: JobListItem[] = rows.map((row) => {
@@ -367,7 +387,17 @@ export default async function JobsPage({
         skippedCount={skippedCount}
         verdictFilter={filters.verdict}
         total={total}
-        page={page}
+        // `total` is a COUNT(*) over the SQL-expressible conditions only —
+        // it still includes rows assessJob would skip for reasons that
+        // aren't cheap SQL (senior title, years_min, staleness past 45
+        // days, low fit score; see the file header). When verdict=worth
+        // those rows are hidden per-page ("N more hidden on this page"),
+        // so the total itself is an upper bound, not an exact count of
+        // "worth applying" rows — flagged here so JobList can render it as
+        // "~101" instead of a falsely precise "101" (QA: /jobs result
+        // count self-contradicts the rendered row count).
+        totalIsApprox={filters.verdict === "worth"}
+        page={effectivePage}
         pageSize={PAGE_SIZE}
       />
     </div>

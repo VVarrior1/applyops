@@ -3,6 +3,11 @@ import { getDb } from "@/src/db/client";
 import { getConfirmedFacts, getPrefs } from "@/src/profile/facts";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { OnboardingFlow } from "./onboarding-flow";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Onboarding",
+};
 
 /**
  * `/onboarding` — spec §9: "upload PDF → facts review → prefs". Runs the

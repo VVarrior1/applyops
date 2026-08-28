@@ -18,6 +18,11 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Funnel",
+};
 
 const GROUP_BY_OPTIONS: { value: FunnelGroupBy; label: string }[] = [
   { value: "week", label: "Week" },

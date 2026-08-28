@@ -14,6 +14,11 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Applications",
+};
 
 const STATUS_LABEL: Record<string, string> = {
   draft: "Draft",
@@ -104,53 +109,55 @@ export default async function ApplicationsPage() {
 
       <PendingApprovals userId={user.id} />
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Company</TableHead>
-            <TableHead>Title</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Applied</TableHead>
-            <TableHead>Last event</TableHead>
-            <TableHead>Log outcome</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.length === 0 && (
+      <div className="overflow-x-auto rounded-lg border">
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground">
-                No applications yet — mark a tailored resume as applied from a
-                job&apos;s Tailor tab.
-              </TableCell>
+              <TableHead>Company</TableHead>
+              <TableHead>Title</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Applied</TableHead>
+              <TableHead>Last event</TableHead>
+              <TableHead>Log outcome</TableHead>
             </TableRow>
-          )}
-          {rows.map((row) => {
-            const lastEvent = lastEventByApplication.get(row.id);
-            return (
-              <TableRow key={row.id}>
-                <TableCell className="font-medium">{row.companyName ?? "—"}</TableCell>
-                <TableCell className="max-w-60 truncate whitespace-normal">
-                  {row.jobTitle}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline">{STATUS_LABEL[row.status] ?? row.status}</Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {format(row.createdAt, "MMM d, yyyy")}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {lastEvent
-                    ? `${EVENT_LABEL[lastEvent.type] ?? lastEvent.type} · ${format(lastEvent.occurredAt, "MMM d")}`
-                    : "—"}
-                </TableCell>
-                <TableCell>
-                  <OutcomeButtons applicationId={row.id} />
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  No applications yet — mark a tailored resume as applied from a
+                  job&apos;s Tailor tab.
                 </TableCell>
               </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
+            )}
+            {rows.map((row) => {
+              const lastEvent = lastEventByApplication.get(row.id);
+              return (
+                <TableRow key={row.id}>
+                  <TableCell className="font-medium">{row.companyName ?? "—"}</TableCell>
+                  <TableCell className="max-w-60 truncate whitespace-normal">
+                    {row.jobTitle}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{STATUS_LABEL[row.status] ?? row.status}</Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {format(row.createdAt, "MMM d, yyyy")}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {lastEvent
+                      ? `${EVENT_LABEL[lastEvent.type] ?? lastEvent.type} · ${format(lastEvent.occurredAt, "MMM d")}`
+                      : "—"}
+                  </TableCell>
+                  <TableCell>
+                    <OutcomeButtons applicationId={row.id} />
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }

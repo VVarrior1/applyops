@@ -10,6 +10,7 @@ import { latestGenerationByStep } from "@/src/pipeline/generations";
 import { SuggestOutput, TailorOutput, type FitOutput } from "@/src/pipeline/schemas";
 import { factLabels } from "@/src/pipeline/steps";
 import { getConfirmedFacts, getPrefs, type SearchPrefsRow } from "@/src/profile/facts";
+import { countsAsApplied } from "@/src/rank/candidates";
 import { fitRankerVersion, KEYWORD_RANKER_VERSION } from "@/src/rank/rank";
 import { assessJob, type VerdictInput } from "@/src/rank/verdict";
 import { isJobDetailTab } from "@/components/jobs/job-detail-tab";
@@ -17,6 +18,11 @@ import { JobDetailTabs } from "@/components/jobs/JobDetailTabs";
 import type { SuggestInitialGeneration } from "@/components/jobs/SuggestionsTab";
 import type { TailorInitialGeneration } from "@/components/jobs/TailorTab";
 import { VerdictBadge } from "@/components/jobs/VerdictBadge";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Job",
+};
 
 type VerdictPrefs = NonNullable<VerdictInput["prefs"]>;
 
@@ -109,11 +115,13 @@ export default async function JobDetailPage({
         ),
       ),
     getPrefs(db, user.id),
+    // No `.limit(1)`: a user can withdraw and later re-apply, leaving more
+    // than one applications row for the same job — every one has to be
+    // checked against countsAsApplied, not just whichever comes back first.
     db
-      .select({ id: applications.id })
+      .select({ id: applications.id, status: applications.status })
       .from(applications)
-      .where(and(eq(applications.userId, user.id), eq(applications.jobId, jobRow.id)))
-      .limit(1),
+      .where(and(eq(applications.userId, user.id), eq(applications.jobId, jobRow.id))),
     // Every `tailor`/`suggest` generation for this job+user — reduced to
     // "the latest one per step" below by `latestGenerationByStep` (spec:
     // "tailor and suggest from the generations table (step + jobId +
@@ -208,7 +216,7 @@ export default async function JobDetailPage({
     analysis,
     fitScore: fitRow?.score ?? null,
     prefs: toVerdictPrefs(prefs),
-    alreadyApplied: appliedRows.length > 0,
+    alreadyApplied: appliedRows.some((row) => countsAsApplied(row.status)),
   });
 
   return (

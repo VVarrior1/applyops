@@ -3,6 +3,11 @@ import { requireOwner } from "@/src/auth/require";
 import { getDb } from "@/src/db/client";
 import { allowedEmails } from "@/src/db/schema";
 import { AllowedEmailsManager } from "./allowed-emails-manager";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Admin",
+};
 
 export default async function AdminPage() {
   await requireOwner();

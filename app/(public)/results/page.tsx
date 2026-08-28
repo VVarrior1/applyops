@@ -12,6 +12,11 @@ import {
 } from "@/components/ui/card";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { FunnelChart } from "@/components/funnel/FunnelChart";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Results",
+};
 
 export const revalidate = 300;
 

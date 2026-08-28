@@ -1,4 +1,9 @@
 import { LoginForm } from "./login-form";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Sign in",
+};
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const params = await searchParams;
