@@ -184,6 +184,13 @@ function toTailorPayload(
   const payload: TailorOutput = {
     summary,
     skills,
+    // Carried straight through from the generation. The categories are the
+    // *base resume's*, not something this tab lets anyone edit, and dropping
+    // them here would silently send the PDF route a flat skills list — which
+    // is exactly the flattening `skill_groups` exists to prevent. `undefined`
+    // is preserved for a pre-1.3.0 generation, same rule as
+    // `experience`/`projects` below.
+    ...(source.skill_groups ? { skill_groups: source.skill_groups } : {}),
     sections: source.sections
       .map((section, s) => ({ heading: section.heading, bullets: included("section", s) }))
       .filter((section) => section.bullets.length > 0),
@@ -223,6 +230,57 @@ function serializeOverlay(groups: EditableGroup[]): string {
     }
   }
   return JSON.stringify({ editedText, excludedPaths });
+}
+
+/**
+ * The skills read-only block.
+ *
+ * Grouped when the generation carries the base resume's own categories
+ * (`skill_groups`), because that is how the downloaded PDF prints them —
+ * showing one undifferentiated wall of chips here and four labelled lines in
+ * the PDF is a preview that lies about the document. Falls back to the flat
+ * chip row for a user with no base resume and for pre-1.3.0 generations.
+ *
+ * Read-only in both shapes: the categories belong to the base `.tex`, so the
+ * place to change them is the resume the user imports, not this tab.
+ */
+function SkillsBlock({
+  skills,
+  groups,
+}: {
+  skills: string[];
+  groups?: { label: string; items: string[] }[];
+}) {
+  const grouped = (groups ?? []).filter((group) => group.items.length > 0);
+
+  if (grouped.length === 0) {
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {skills.map((skill) => (
+          <Badge key={skill} variant="secondary">
+            {skill}
+          </Badge>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {grouped.map((group) => (
+        <div key={group.label} className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-muted-foreground">{group.label}</span>
+          <div className="flex flex-wrap gap-1.5">
+            {group.items.map((item, i) => (
+              <Badge key={`${item}-${i}`} variant="secondary">
+                {item.replace(/;$/, "").trim()}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function FactChips({ ids }: { ids: string[] }) {
@@ -651,13 +709,7 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
 
           <div className="flex flex-col gap-1.5">
             <h3 className="text-sm font-semibold">Skills</h3>
-            <div className="flex flex-wrap gap-1.5">
-              {skills.map((skill) => (
-                <Badge key={skill} variant="secondary">
-                  {skill}
-                </Badge>
-              ))}
-            </div>
+            <SkillsBlock skills={skills} groups={source?.skill_groups} />
           </div>
 
           {groups.map((group, g) => (

@@ -26,6 +26,8 @@
 
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { isExperienceHeading, isProjectsHeading } from "./headings";
+import { latexToPlain } from "./latex";
+import { unescapeLatexSpecials } from "./skills-groups";
 import type { CitedBullet, Fact, TailorOutput } from "../pipeline/schemas";
 
 export interface ResumeProfile {
@@ -81,6 +83,9 @@ const styles = StyleSheet.create({
   skillsLine: {
     fontSize: 10,
     lineHeight: 1.5,
+  },
+  skillsLabel: {
+    fontFamily: "Helvetica-Bold",
   },
   entry: {
     marginBottom: 7,
@@ -186,7 +191,51 @@ function Bullets({ bullets }: { bullets: CitedBullet[] }) {
   );
 }
 
-function SkillsSection({ skills }: { skills: string[] }) {
+/**
+ * The Skills block.
+ *
+ * `groups` wins when the tailoring carries the base resume's own categories
+ * (`skill_groups` — see `src/pdf/skills-groups.ts`): a resume whose author
+ * grouped their skills under Languages / Frameworks & Data / … must read the
+ * same way in both renderers, and a bullet-separated run-on of every skill on
+ * one line loses the grouping that made the block scannable. The flat line
+ * stays for a user with no base resume, and for a base that never had
+ * categories.
+ *
+ * Items keep whatever LaTeX escaping they arrived with (`LLM \& RAG`), so
+ * they are read back to plain text first — this is a PDF drawn with fonts,
+ * not a TeX document.
+ */
+function SkillsSection({
+  skills,
+  groups,
+}: {
+  skills: string[];
+  groups?: { label: string; items: string[] }[];
+}) {
+  const grouped = (groups ?? [])
+    .map((group) => ({
+      label: unescapeLatexSpecials(latexToPlain(group.label)),
+      items: group.items
+        .map((item) => unescapeLatexSpecials(latexToPlain(item)).replace(/;$/, "").trim())
+        .filter(Boolean),
+    }))
+    .filter((group) => group.label && group.items.length > 0);
+
+  if (grouped.length > 0) {
+    return (
+      <View style={styles.section}>
+        <Text style={styles.sectionHeading}>Skills</Text>
+        {grouped.map((group) => (
+          <Text key={group.label} style={styles.skillsLine}>
+            <Text style={styles.skillsLabel}>{group.label}: </Text>
+            {group.items.join(", ")}
+          </Text>
+        ))}
+      </View>
+    );
+  }
+
   if (skills.length === 0) return null;
   return (
     <View style={styles.section}>
@@ -448,7 +497,7 @@ export function ResumeDocument({ profile, tailor, education }: RenderResumeInput
 
         {tailor.summary && <Text style={styles.summary}>{tailor.summary}</Text>}
 
-        <SkillsSection skills={tailor.skills} />
+        <SkillsSection skills={tailor.skills} groups={tailor.skill_groups} />
         <EducationSection education={education} />
         <ExperienceSection entries={experience} />
         <ProjectsSection projects={projects} />

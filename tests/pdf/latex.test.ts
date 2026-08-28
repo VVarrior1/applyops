@@ -24,8 +24,10 @@ import {
   replaceProjectsSection,
   replaceSkillsSection,
   resetLatexAvailabilityCache,
+  spliceSkillsSection,
   spliceTailoredResume,
 } from "@/src/pdf/latex";
+import { parseSkillGroups } from "@/src/pdf/skills-groups";
 import type { TailorOutput } from "@/src/pipeline/schemas";
 
 /**
@@ -814,5 +816,171 @@ describe("renderLatexResume keeps every section of a Projects-in-the-middle base
     expect(text).toContain("City Utilities Board");
     expect(text).toContain("State University");
     expect(text).toContain("Built a Kanban app with role-based access control.");
+  }, 180_000);
+});
+
+// ---------------------------------------------------------------------------
+// The categorised skills path
+// ---------------------------------------------------------------------------
+
+/**
+ * The same PII-free base, but with the owner's real Technical Skills block:
+ * four hand-chosen categories rather than v1's `Proficient`/`Familiar` pair.
+ *
+ * This is the regression these tests exist for. The splice used to flatten
+ * `TailorOutput.skills` into `\textbf{Proficient}{: …}`, which on a document
+ * like this one *deleted four categories the author wrote* and replaced them
+ * with two headings they had never used.
+ */
+const GROUPED_BASE = readFileSync(
+  path.join(path.dirname(FIXTURE_PATH), "resume-base-grouped.tex"),
+  "utf-8",
+);
+
+/** The base's own categories, reordered and trimmed the way a tailor run would. */
+const TAILORED_GROUPS: NonNullable<TailorOutput["skill_groups"]> = [
+  { label: "Languages", items: ["TypeScript/JavaScript", "SQL", "Python"] },
+  {
+    label: "Frameworks & Data",
+    items: ["Next.js", "React", "PostgreSQL", "Supabase", "REST APIs"],
+  },
+  {
+    label: "Cloud & Infrastructure",
+    items: ["Docker", "CI/CD", "Vercel", "GCP (Vertex AI, BigQuery)"],
+  },
+  { label: "AI/ML", items: ["LLM \\& RAG application design", "prompt engineering"] },
+];
+
+describe("replaceSkillsSection with the base resume's own categories", () => {
+  const out = replaceSkillsSection(GROUPED_BASE, ["ignored"], TAILORED_GROUPS);
+  const groups = parseSkillGroups(out);
+
+  it("keeps the four labels, in the base's order and spelling", () => {
+    expect(groups.map((g) => g.label)).toEqual([
+      "Languages",
+      "Frameworks & Data",
+      "Cloud & Infrastructure",
+      "AI/ML",
+    ]);
+    expect(out).toContain("\\textbf{Frameworks \\& Data}{: ");
+  });
+
+  it("writes the tailored order inside each category", () => {
+    expect(groups[0].items).toEqual(["TypeScript/JavaScript", "SQL", "Python"]);
+    expect(out).toContain(
+      "\\textbf{Languages}{: TypeScript/JavaScript, SQL, Python}",
+    );
+  });
+
+  it("only ever reorders or drops — every item is one the base already had", () => {
+    const baseItems = new Set(
+      parseSkillGroups(GROUPED_BASE).flatMap((g) => g.items.map((i) => i.replace(/;$/, ""))),
+    );
+    for (const group of groups) {
+      for (const item of group.items) {
+        expect(baseItems.has(item.replace(/;$/, ""))).toBe(true);
+      }
+    }
+  });
+
+  it("never writes v1's Proficient/Familiar pair over them", () => {
+    expect(out).not.toContain("\\textbf{Proficient}");
+    expect(out).not.toContain("\\textbf{Familiar}");
+  });
+
+  it("changes nothing outside the skills block", () => {
+    expect(head(out)).toBe(head(GROUPED_BASE));
+    expect(middle(out)).toBe(middle(GROUPED_BASE));
+    expect(tail(out)).toBe(tail(GROUPED_BASE));
+  });
+
+  it("ignores a label the base does not define and keeps that base group", () => {
+    const withAlien = replaceSkillsSection(GROUPED_BASE, [], [
+      ...TAILORED_GROUPS,
+      { label: "Leadership", items: ["Mentoring 4 juniors"] },
+    ]);
+    expect(withAlien).not.toContain("Leadership");
+    expect(parseSkillGroups(withAlien)).toHaveLength(4);
+  });
+
+  it("keeps a category the model said nothing about exactly as the base wrote it", () => {
+    const partial = replaceSkillsSection(GROUPED_BASE, [], [TAILORED_GROUPS[0]]);
+    const parsed = parseSkillGroups(partial);
+    const base = parseSkillGroups(GROUPED_BASE);
+    expect(parsed[1]).toEqual(base[1]);
+    expect(parsed[3]).toEqual(base[3]);
+    expect(partial).toContain(
+      "computer vision (YOLOv8/v11, OpenCV, PyTorch); Claude Code, Cursor, MCP",
+    );
+  });
+
+  it("leaves a categorised base untouched rather than flattening it", () => {
+    // A generation from before `skill_groups` existed. Losing the tailoring is
+    // recoverable by re-running Tailor; losing the author's categories off the
+    // resume they actually send is not.
+    expect(replaceSkillsSection(GROUPED_BASE, ["Go", "Kubernetes"])).toBe(GROUPED_BASE);
+    expect(spliceSkillsSection(GROUPED_BASE, ["Go"]).source).toBe("base");
+  });
+
+  it("still uses v1's flat path for a v1-shaped base", () => {
+    const flat = spliceSkillsSection(BASE, ["Go", "PostgreSQL"]);
+    expect(flat.source).toBe("flat");
+    expect(flat.tex).toContain("\\textbf{Proficient}{: Go, PostgreSQL}");
+  });
+
+  it("reports the categorised path as its source", () => {
+    expect(spliceSkillsSection(GROUPED_BASE, [], TAILORED_GROUPS).source).toBe("groups");
+  });
+});
+
+describe("spliceTailoredResume with skill_groups", () => {
+  it("carries the categories through the whole splice", () => {
+    const { tex, skillsSource } = spliceTailoredResume(GROUPED_BASE, {
+      ...TAILOR,
+      skill_groups: TAILORED_GROUPS,
+    });
+    expect(skillsSource).toBe("groups");
+    expect(tex).toContain("\\textbf{Cloud \\& Infrastructure}{: Docker, CI/CD, Vercel, GCP (Vertex AI, BigQuery)}");
+    expect(head(tex)).toBe(head(GROUPED_BASE));
+  });
+});
+
+/**
+ * The end-to-end proof for the categorised path: the owner's own block, run
+ * through the real `pdflatex`, read back as text. The unit tests above assert
+ * the `.tex` is right; this one asserts it is also *valid* — an escaping bug
+ * in the splice would compile to a broken block or not at all, and the PDF
+ * route's silent react-pdf fallback would hide it.
+ */
+describe("renderLatexResume keeps the base's skill categories (real pdflatex)", () => {
+  it("prints all four headings in the PDF", async ({ skip }) => {
+    if (!(await isLatexAvailable())) {
+      skip();
+      return;
+    }
+    const result = await renderLatexResume({
+      base: { latex: GROUPED_BASE },
+      tailor: { ...TAILOR, skill_groups: TAILORED_GROUPS },
+    });
+    expect(result.pdf.subarray(0, 4).toString("latin1")).toBe("%PDF");
+    expect(result.skillsSource).toBe("groups");
+
+    let text: string;
+    try {
+      text = execFileSync("pdftotext", ["-", "-"], {
+        input: result.pdf,
+        encoding: "utf-8",
+        maxBuffer: 8 * 1024 * 1024,
+      });
+    } catch {
+      return; // no poppler on this host
+    }
+    const flat = text.replace(/\s+/g, " ");
+    expect(flat).toContain("Languages: TypeScript/JavaScript, SQL, Python");
+    expect(flat).toContain("Frameworks & Data: Next.js, React, PostgreSQL, Supabase, REST APIs");
+    expect(flat).toContain("Cloud & Infrastructure: Docker, CI/CD, Vercel, GCP (Vertex AI, BigQuery)");
+    expect(flat).toContain("AI/ML: LLM & RAG application design, prompt engineering");
+    expect(flat).not.toContain("Proficient");
+    expect(flat).not.toContain("Familiar");
   }, 180_000);
 });

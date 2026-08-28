@@ -70,6 +70,7 @@ import {
   readBalancedGroup,
 } from "./latex";
 import { isExperienceHeading, isProjectsHeading, soleSection } from "./headings";
+import { isLegacySkillsShape, parseSkillGroups } from "./skills-groups";
 import type { CitedBullet, TailorOutput } from "../pipeline/schemas";
 
 /** The most bullets a derived experience entry gets — mirrors the prompt's cap. */
@@ -624,5 +625,31 @@ export function enrichTailorFromBase(
     ...tailor,
     ...(experience.length > 0 ? { experience } : {}),
     ...((projects ?? []).length > 0 ? { projects } : {}),
+    ...(skillGroupsForTemplate(tailor, baseLatex) ?? {}),
   };
+}
+
+/**
+ * The base's skill categories, for a generation that has none of its own.
+ *
+ * The react-pdf fallback prints whatever `skill_groups` it is given as
+ * labelled lines, so a pre-1.3.0 generation would otherwise show one flat
+ * "Skills" row while the LaTeX renderer shows the user's four categories —
+ * two renderers of the same resume disagreeing about its shape. Untailored is
+ * the honest filling: nothing here knows which of the author's skills this
+ * posting wanted.
+ *
+ * Nothing is returned (so the spread above is a no-op) when the generation
+ * already has groups, when the base has no categories, or when its categories
+ * are v1's `Proficient`/`Familiar` pair — those are not a categorisation
+ * anyone chose, and the flat Skills row reads better than reprinting them.
+ */
+function skillGroupsForTemplate(
+  tailor: TailorOutput,
+  baseLatex: string,
+): Pick<TailorOutput, "skill_groups"> | null {
+  if ((tailor.skill_groups ?? []).length > 0) return null;
+  const groups = parseSkillGroups(baseLatex);
+  if (groups.length === 0 || isLegacySkillsShape(groups)) return null;
+  return { skill_groups: groups };
 }

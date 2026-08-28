@@ -63,8 +63,9 @@ function fakeDb(script: {
 describe("loadPrompt", () => {
   it("reads the version from the file's front matter", () => {
     // Bumped to 1.2.0 when the prompt gained the `experience` entries
-    // (v1 parity — see src/pipeline/schemas.ts).
-    expect(loadPrompt("tailor").version).toBe("1.2.0");
+    // (v1 parity — see src/pipeline/schemas.ts), and to 1.3.0 when it gained
+    // `skill_groups` (the base resume's own skill categories).
+    expect(loadPrompt("tailor").version).toBe("1.3.0");
   });
 
   it("returns a stable sha256 across calls", () => {

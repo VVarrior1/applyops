@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { renderResumePdf } from "@/src/pdf/render";
 import { documentTitle } from "@/src/pdf/ResumeDocument";
@@ -41,6 +42,43 @@ describe("renderResumePdf", () => {
     });
 
     expect(buffer.subarray(0, 4).toString("latin1")).toBe("%PDF");
+  });
+
+  it("prints the base resume's skill categories as labelled lines", async () => {
+    // The react-pdf fallback has to agree with the LaTeX renderer about the
+    // *shape* of the skills block: a user whose base resume groups skills
+    // under their own headings must not get one flat bullet-separated row
+    // just because this host has no pdflatex.
+    const buffer = await renderResumePdf({
+      profile: { name: "Jane Doe", email: "jane@example.com", phone: "", links: [] },
+      tailor: {
+        ...MINIMAL_TAILOR,
+        skill_groups: [
+          { label: "Languages", items: ["Python", "TypeScript/JavaScript"] },
+          // Escaped LaTeX in, plain text out — this is a PDF, not a .tex.
+          { label: "Frameworks & Data", items: ["Next.js", "LLM \\& RAG design;"] },
+        ],
+      },
+      education: MINIMAL_EDUCATION,
+    });
+    expect(buffer.subarray(0, 4).toString("latin1")).toBe("%PDF");
+
+    let text: string;
+    try {
+      text = execFileSync("pdftotext", ["-", "-"], {
+        input: buffer,
+        encoding: "utf-8",
+        maxBuffer: 8 * 1024 * 1024,
+      });
+    } catch {
+      return; // no poppler on this host
+    }
+    expect(text).toContain("Languages:");
+    expect(text).toContain("Frameworks & Data:");
+    expect(text).toContain("LLM & RAG design");
+    expect(text).not.toContain("LLM \\& RAG design");
+    // The flat one-line fallback must not also be drawn.
+    expect(text).not.toContain("TypeScript  •  PostgreSQL");
   });
 });
 

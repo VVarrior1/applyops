@@ -6,6 +6,7 @@ import type { Db } from "../../src/db/client";
 import { loadPrompt } from "../../src/pipeline/prompt-versions";
 import type { AnalyzeOutput, Fact, FitOutput } from "../../src/pipeline/schemas";
 import {
+  buildTailorPrompt,
   runAnalyze,
   runExtractFacts,
   runFit,
@@ -357,6 +358,83 @@ describe("runTailor", () => {
     });
 
     expect(generationRows()[0].modelId).toBe(DEFAULT_MODEL_BY_STEP.tailor);
+  });
+
+  it("shows the base resume's skill categories to the model as a numbered list", async () => {
+    const { db } = fakeDb();
+    const { model, sent } = replyWith(grounded);
+
+    await runTailor(db, {
+      analysis: ANALYSIS,
+      facts: FACTS,
+      skillGroups: [
+        { label: "Languages", items: ["Python", "SQL"] },
+        { label: "Frameworks & Data", items: ["Next.js", "PostgreSQL"] },
+      ],
+      userId: null,
+      _internal: { model },
+    });
+
+    // `sent()` is the whole captured call serialized, so assert on single
+    // lines: a `\n` in the real prompt is `\\n` in that JSON.
+    const prompt = sent();
+    expect(prompt).toContain("1. Languages — Python, SQL");
+    expect(prompt).toContain("2. Frameworks & Data — Next.js, PostgreSQL");
+    expect(prompt).toContain("Never invent a group, never move an item to another group.");
+
+    // The user message itself, unserialized.
+    expect(
+      buildTailorPrompt({
+        analysis: ANALYSIS,
+        facts: FACTS,
+        skillGroups: [
+          { label: "Languages", items: ["Python", "SQL"] },
+          { label: "Frameworks & Data", items: ["Next.js", "PostgreSQL"] },
+        ],
+      }),
+    ).toContain(
+      "## Base resume skill categories\nReturn `skill_groups` using EXACTLY these labels in this order:\n1. Languages — Python, SQL\n2. Frameworks & Data — Next.js, PostgreSQL",
+    );
+  });
+
+  it("says nothing about categories when the user has no base resume", async () => {
+    const { db } = fakeDb();
+    const { model, sent } = replyWith(grounded);
+
+    await runTailor(db, {
+      analysis: ANALYSIS,
+      facts: FACTS,
+      skillGroups: [],
+      userId: null,
+      _internal: { model },
+    });
+
+    expect(sent()).not.toContain("Return `skill_groups` using EXACTLY");
+    expect(
+      buildTailorPrompt({ analysis: ANALYSIS, facts: FACTS, skillGroups: [] }),
+    ).not.toContain("Base resume skill categories");
+  });
+
+  it("derives `skills` from `skill_groups` so the two can never disagree", async () => {
+    const { db } = fakeDb();
+    const { model } = replyWith({
+      ...grounded,
+      skills: ["something", "the model made up"],
+      skill_groups: [
+        { label: "Languages", items: ["Python", "SQL;"] },
+        { label: "Frameworks & Data", items: ["Next.js", "python"] },
+      ],
+    });
+
+    const result = await runTailor(db, {
+      analysis: ANALYSIS,
+      facts: FACTS,
+      skillGroups: [{ label: "Languages", items: ["Python", "SQL"] }],
+      userId: null,
+      _internal: { model },
+    });
+
+    expect(result.output.skills).toEqual(["Python", "SQL", "Next.js"]);
   });
 });
 

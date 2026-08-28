@@ -39,6 +39,12 @@
  *     no longer a hardcoded constant — it is lifted out of the *base* resume's
  *     own skills block, so a user's own wording survives (v1's list is only
  *     the fallback, see {@link DEFAULT_FAMILIAR_SKILLS}).
+ *   - v1's two-line `Proficient`/`Familiar` skills block is now only one of
+ *     two shapes. A base that groups its skills under headings its author
+ *     chose (Languages / Frameworks & Data / …) keeps those headings: the
+ *     tailor step is shown them (`TailorOutput.skill_groups`) and may only
+ *     reorder, trim or add *within* them. See `./skills-groups` and
+ *     {@link spliceSkillsSection}; a v1-shaped base is unaffected.
  *   - v1 had `selected_projects: {name, technologies, tailored_description}`.
  *     v2's `TailorOutput.projects` is the direct equivalent (added for this
  *     purpose — see `src/pipeline/schemas.ts`), and when a named project also
@@ -60,6 +66,15 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { isProjectsHeading, soleSection } from "./headings";
+import {
+  SKILLS_REGEX,
+  isLegacySkillsShape,
+  mergeSkillGroups,
+  parseSkillGroups,
+  readBalancedGroup,
+  renderSkillGroups,
+  type SkillGroup,
+} from "./skills-groups";
 import type { TailorOutput } from "../pipeline/schemas";
 
 const execFileAsync = promisify(execFile);
@@ -305,16 +320,12 @@ export function escapeLatex(text: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * v1's `skillsRegex`, character for character.
- *
- * Three capture groups: everything up to and including the opening
- * `\small{\item{`, the block's current contents, and the closing
- * `}}\end{itemize}`. Only group 2 is replaced, so the `%---...---` banner
- * comment and the `\begin{itemize}` options stay exactly as the author wrote
- * them.
+ * v1's `skillsRegex` and the brace reader it needs now live in
+ * `./skills-groups`, which has to be a leaf module (this file imports it).
+ * Re-exported here because `cli/commands/resume.ts`, `src/pdf/base-entries.ts`
+ * and `tests/pdf/latex.test.ts` have always imported them from `latex.ts`.
  */
-export const SKILLS_REGEX =
-  /(%-----------TECHNICAL SKILLS-----------[\s\S]*?\\section{Technical Skills}[\s\S]*?\\begin{itemize}\[leftmargin=0.15in, label={}\]\s*\\small{\\item{\s*)([\s\S]*?)(}\s*}\s*\\end{itemize})/;
+export { SKILLS_REGEX, readBalancedGroup } from "./skills-groups";
 
 /**
  * The "Familiar:" half of v1's skills line. Only a fallback now — a base
@@ -385,9 +396,57 @@ function parseFamiliar(raw: string): string[] {
 export function replaceSkillsSection(
   content: string,
   skills: readonly string[],
+  skillGroups?: readonly SkillGroup[] | null,
 ): string {
+  return spliceSkillsSection(content, skills, skillGroups).tex;
+}
+
+/**
+ * Which of the three skills paths actually ran, for the CLI's render report
+ * and for tests that need to assert the *reason* an output looks the way it
+ * does rather than re-deriving it from the text.
+ *
+ * - `groups` — the base's own categories, with tailored items in them.
+ * - `flat` — v1's `\textbf{Proficient}{: …} \\ \textbf{Familiar}{: …}` pair.
+ * - `base` — the base's skills block, untouched.
+ */
+export type SkillsSource = "groups" | "flat" | "base";
+
+/** {@link replaceSkillsSection}, also saying which path it took. */
+export function spliceSkillsSection(
+  content: string,
+  skills: readonly string[],
+  skillGroups?: readonly SkillGroup[] | null,
+): { tex: string; source: SkillsSource } {
   const match = content.match(SKILLS_REGEX);
-  if (!match) return content;
+  if (!match) return { tex: content, source: "base" };
+
+  const baseGroups = parseSkillGroups(content);
+
+  if (baseGroups.length > 0 && skillGroups && skillGroups.length > 0) {
+    const { groups, ignored } = mergeSkillGroups(baseGroups, skillGroups);
+    if (ignored.length > 0) {
+      // Almost always means the prompt and the base resume have drifted
+      // apart, which is worth a line in the server log even though the render
+      // itself is fine (the base's own group is kept for that label).
+      console.warn(
+        `[pdf] tailored skill_groups named ${ignored.length} label(s) the base resume does not define; ignored: ${ignored.join(", ")}`,
+      );
+    }
+    const body = renderSkillGroups(groups);
+    if (body.trim()) return { tex: spliceSkillsBody(content, body), source: "groups" };
+  }
+
+  // The base groups skills under headings its author chose, and this run has
+  // no categorised answer to write into them (a generation from before
+  // `skill_groups` existed, or a tailor call that was never shown the base).
+  // Leaving the block alone loses the tailoring; flattening it loses four
+  // hand-written categories off the resume the owner actually sends. Losing
+  // the tailoring is the smaller loss, and it is recoverable by re-running
+  // Tailor.
+  if (baseGroups.length > 0 && !isLegacySkillsShape(baseGroups)) {
+    return { tex: content, source: "base" };
+  }
 
   const existingFamiliar = readFamiliarLine(match[2]);
   const familiarList = existingFamiliar
@@ -408,7 +467,7 @@ export function replaceSkillsSection(
 
   // An empty Proficient line would compile to a stray colon; if the tailored
   // skills all turned out to be "Familiar" ones, leave the base alone.
-  if (proficient.length === 0) return content;
+  if (proficient.length === 0) return { tex: content, source: "base" };
 
   const proficientTex = proficient.map(escapeLatex).join(", ");
   // Already-LaTeX when it came from the base document (`C\#`), so only escape
@@ -420,16 +479,25 @@ export function replaceSkillsSection(
   const newSkillsContent = `\\textbf{Proficient}{: ${proficientTex}} \\\\
     \\textbf{Familiar}{: ${familiarTex}}`;
 
-  // The *function* form of `replace`, never a replacement string: a skill is
-  // free text from the tailor model, and "Raised $1M in seed funding" escapes
-  // to `Raised \$1M …`, whose `$1` a replacement string would expand into
-  // capture group 1 — the whole `%---TECHNICAL SKILLS---…\small{\item{`
-  // prefix. That corrupts the document silently (it still compiles), so the
-  // PDF route's fallback never fires and the user downloads a mangled resume.
+  return { tex: spliceSkillsBody(content, newSkillsContent), source: "flat" };
+}
+
+/**
+ * Writes `body` into the Technical Skills block, leaving everything else
+ * alone.
+ *
+ * The *function* form of `replace`, never a replacement string: a skill is
+ * free text from the tailor model, and "Raised $1M in seed funding" escapes to
+ * `Raised \$1M …`, whose `$1` a replacement string would expand into capture
+ * group 1 — the whole `%---TECHNICAL SKILLS---…\small{\item{` prefix. That
+ * corrupts the document silently (it still compiles), so the PDF route's
+ * fallback never fires and the user downloads a mangled resume.
+ */
+function spliceSkillsBody(content: string, body: string): string {
   return content.replace(
     SKILLS_REGEX,
-    (_match, before: string, _body: string, after: string) =>
-      `${before}${newSkillsContent}${after}`,
+    (_match, before: string, _oldBody: string, after: string) =>
+      `${before}${body}${after}`,
   );
 }
 
@@ -479,33 +547,6 @@ export interface ResolvedProject {
   /** Raw LaTeX for the heading argument. Already escaped or reused verbatim. */
   headingRaw: string;
   bullets: string[];
-}
-
-/**
- * Reads the balanced `{...}` group starting at `src[start]` (which must be
- * `{`). Returns the contents and the index just past the closing brace.
- * Backslash-escaped braces (`\{`, `\}`) do not count toward the balance —
- * `\{` is a literal brace in LaTeX, not a group delimiter.
- */
-export function readBalancedGroup(
-  src: string,
-  start: number,
-): { value: string; end: number } | null {
-  if (src[start] !== "{") return null;
-  let depth = 0;
-  for (let i = start; i < src.length; i++) {
-    const ch = src[i];
-    if (ch === "\\") {
-      i++; // skip the escaped character, whatever it is
-      continue;
-    }
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) return { value: src.slice(start + 1, i), end: i + 1 };
-    }
-  }
-  return null;
 }
 
 /**
@@ -925,15 +966,16 @@ export function spliceTailoredResume(
   baseLatex: string,
   tailor: TailorOutput,
   contact?: LatexContact,
-): { tex: string; projectsSource: ProjectsSource } {
+): { tex: string; projectsSource: ProjectsSource; skillsSource: SkillsSource } {
   const baseProjects = extractBaseProjects(baseLatex);
   const { projects, source } = resolveProjects(tailor, baseProjects);
 
   let tex = fillContactPlaceholders(baseLatex, contact);
-  tex = replaceSkillsSection(tex, tailor.skills);
+  const skills = spliceSkillsSection(tex, tailor.skills, tailor.skill_groups);
+  tex = skills.tex;
   if (projects.length > 0) tex = replaceProjectsSection(tex, projects);
 
-  return { tex, projectsSource: source };
+  return { tex, projectsSource: source, skillsSource: skills.source };
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,6 +1126,8 @@ export interface LatexResumeResult {
   /** The spliced `.tex` that produced it — written next to the PDF by the CLI. */
   tex: string;
   projectsSource: ProjectsSource;
+  /** Which skills path ran — see {@link SkillsSource}. Reported by the CLI. */
+  skillsSource: SkillsSource;
   transcriptMerged: boolean;
 }
 
@@ -1097,7 +1141,7 @@ export interface LatexResumeResult {
 export async function renderLatexResume(
   input: RenderLatexResumeInput,
 ): Promise<LatexResumeResult> {
-  const { tex, projectsSource } = spliceTailoredResume(
+  const { tex, projectsSource, skillsSource } = spliceTailoredResume(
     input.base.latex,
     input.tailor,
     input.contact,
@@ -1107,8 +1151,8 @@ export async function renderLatexResume(
 
   if (input.includeTranscript && input.base.transcriptPdf?.length) {
     const { pdf, merged } = await mergeWithTranscript(compiled, input.base.transcriptPdf);
-    return { pdf, tex, projectsSource, transcriptMerged: merged };
+    return { pdf, tex, projectsSource, skillsSource, transcriptMerged: merged };
   }
 
-  return { pdf: compiled, tex, projectsSource, transcriptMerged: false };
+  return { pdf: compiled, tex, projectsSource, skillsSource, transcriptMerged: false };
 }
