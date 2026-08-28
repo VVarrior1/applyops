@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, like, or } from "drizzle-orm";
 import { format } from "date-fns";
 import { requireUser } from "@/src/auth/require";
 import { getDb } from "@/src/db/client";
@@ -11,7 +11,7 @@ import { SuggestOutput, TailorOutput, type FitOutput } from "@/src/pipeline/sche
 import { factLabels } from "@/src/pipeline/steps";
 import { getConfirmedFacts, getPrefs, type SearchPrefsRow } from "@/src/profile/facts";
 import { countsAsApplied } from "@/src/rank/candidates";
-import { fitRankerVersion, KEYWORD_RANKER_VERSION } from "@/src/rank/rank";
+import { fitRankerVersion, KEYWORD_RANKER_VERSION, pickFitScoreRow } from "@/src/rank/rank";
 import { assessJob, type VerdictInput } from "@/src/rank/verdict";
 import { isJobDetailTab } from "@/components/jobs/job-detail-tab";
 import { JobDetailTabs } from "@/components/jobs/JobDetailTabs";
@@ -98,6 +98,12 @@ export default async function JobDetailPage({
 
   const fitVersion = fitRankerVersion(DEFAULT_MODEL_BY_STEP.fit);
   const [scoreRows, prefs, appliedRows, genRows, facts] = await Promise.all([
+    // Every fit-ranker version this job+user has ever been scored under,
+    // not just the current one — a stale-model row still needs to be
+    // visible so `pickFitScoreRow` below can fall back to it instead of
+    // the page acting like the job was never scored. `like('fit-v1:%')`
+    // catches every model that's ever been the fit default; the exact
+    // `KEYWORD_RANKER_VERSION` match is unaffected.
     db
       .select({
         rankerVersion: jobScores.rankerVersion,
@@ -105,13 +111,14 @@ export default async function JobDetailPage({
         matched: jobScores.matched,
         gaps: jobScores.gaps,
         rationale: jobScores.rationale,
+        createdAt: jobScores.createdAt,
       })
       .from(jobScores)
       .where(
         and(
           eq(jobScores.jobId, jobRow.id),
           eq(jobScores.userId, user.id),
-          inArray(jobScores.rankerVersion, [fitVersion, KEYWORD_RANKER_VERSION]),
+          or(like(jobScores.rankerVersion, "fit-v1:%"), eq(jobScores.rankerVersion, KEYWORD_RANKER_VERSION)),
         ),
       ),
     getPrefs(db, user.id),
@@ -156,7 +163,14 @@ export default async function JobDetailPage({
     getConfirmedFacts(db, user.id),
   ]);
 
-  const fitRow = scoreRows.find((row) => row.rankerVersion === fitVersion);
+  // Prefer a row scored under the current fit default; fall back to the
+  // newest row under an older `fit-v1:<model>` version rather than
+  // treating a job scored before the default last changed as unscored
+  // (see `pickFitScoreRow`'s doc comment — this is the fix for the real
+  // 6903598 fit-default change stranding rows).
+  const pickedFit = pickFitScoreRow(scoreRows, fitVersion);
+  const fitRow = pickedFit?.row ?? null;
+  const initialFitStale = pickedFit?.stale ?? false;
   const keywordRow = scoreRows.find((row) => row.rankerVersion === KEYWORD_RANKER_VERSION);
   const initialFit: FitOutput | null = fitRow
     ? {
@@ -257,6 +271,7 @@ export default async function JobDetailPage({
         fit={{
           initialAnalyzed: analysis != null,
           initialFit,
+          initialFitStale,
           initialKeywordScore: keywordRow?.score ?? null,
         }}
         initialTailorGeneration={initialTailorGeneration}

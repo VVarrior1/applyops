@@ -25,7 +25,7 @@ vi.mock("../../src/pipeline/steps", () => ({
 
 import { runFit } from "../../src/pipeline/steps";
 import { jobScores } from "../../src/db/schema";
-import { rankForUser, scoreFit } from "../../src/rank/rank";
+import { pickFitScoreRow, rankForUser, scoreFit } from "../../src/rank/rank";
 import type { SearchPrefsRow } from "../../src/profile/facts";
 
 const ANALYSIS: AnalyzeOutput = {
@@ -242,5 +242,37 @@ describe("scoreFit", () => {
     });
 
     expect(result.output.score).toBe(64);
+  });
+});
+
+describe("pickFitScoreRow", () => {
+  const CURRENT = "fit-v1:google:gemini-2.5-flash-lite";
+
+  it("picks the current-version row when one exists, even if an older row is newer", () => {
+    const older = { rankerVersion: CURRENT, createdAt: new Date("2026-01-01") };
+    const newerButStale = { rankerVersion: "fit-v1:google:gemini-3.7-flash", createdAt: new Date("2026-06-01") };
+
+    const result = pickFitScoreRow([newerButStale, older], CURRENT);
+
+    expect(result).toEqual({ row: older, stale: false });
+  });
+
+  it("falls back to the newest older-version row when the current version was never scored — the real 6903598 scenario", () => {
+    const oldest = { rankerVersion: "fit-v1:google:gemini-2.0-flash", createdAt: new Date("2025-06-01") };
+    const stranded = { rankerVersion: "fit-v1:google:gemini-3.7-flash", createdAt: new Date("2026-06-01") };
+
+    const result = pickFitScoreRow([oldest, stranded], CURRENT);
+
+    expect(result).toEqual({ row: stranded, stale: true });
+  });
+
+  it("ignores the keyword-v1 row for both the current-version match and the fallback", () => {
+    const keyword = { rankerVersion: "keyword-v1", createdAt: new Date("2026-06-01") };
+
+    expect(pickFitScoreRow([keyword], CURRENT)).toBeNull();
+  });
+
+  it("returns null when no fit-v1 row exists at all", () => {
+    expect(pickFitScoreRow([], CURRENT)).toBeNull();
   });
 });

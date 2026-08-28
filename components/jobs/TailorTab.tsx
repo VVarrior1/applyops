@@ -203,6 +203,28 @@ function toTailorPayload(
   return payload;
 }
 
+/**
+ * The overlay `persistEdits` would save for `groups`, serialized — the same
+ * shape `PATCH .../tailor/edits` is sent (`editedText`/`excludedPaths`, in
+ * this key order). Pulled out as its own pure function so both the save
+ * path and the "what's already saved" seed below build it identically —
+ * they'd fall out of sync (and the no-op-save guard would misfire) if only
+ * one of them changed.
+ */
+function serializeOverlay(groups: EditableGroup[]): string {
+  const editedText: Record<string, string> = {};
+  const excludedPaths: string[] = [];
+  for (const group of groups) {
+    for (const bullet of group.bullets) {
+      if (bullet.text !== bullet.originalText) editedText[bullet.path] = bullet.text;
+      // A hallucination-blocked bullet is never "excluded" by the user —
+      // see the matching comment in `persistEdits`.
+      if (!bullet.included && !bullet.unsupported) excludedPaths.push(bullet.path);
+    }
+  }
+  return JSON.stringify({ editedText, excludedPaths });
+}
+
 function FactChips({ ids }: { ids: string[] }) {
   if (ids.length === 0) return null;
   return (
@@ -252,6 +274,22 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
   /**
+   * Which renderer produced the last download, read off the response's
+   * `x-applyops-renderer` header (same-origin, so the header is readable
+   * without CORS exposure).
+   *
+   * Worth showing, because the two are not equally good and which one runs is
+   * decided by the *host*, not by anything the user did: `latex` is v1's
+   * pipeline — the user's own `.tex`, imported with
+   * `applyops resume import-latex`, with two blocks swapped — and it only
+   * happens where `pdflatex` exists. Vercel has no TeX distribution, so a
+   * download from the deployed site is always `react-pdf`, the generated
+   * template the owner rated worse than v1. Saying so on the button beats the
+   * owner discovering it in a file already attached to an application.
+   */
+  const [renderer, setRenderer] = useState<"latex" | "react-pdf" | null>(null);
+
+  /**
    * `checkContact()`'s verdict on `profiles.contact`, from
    * `GET /api/profile/contact`. `null` while it is still loading — the
    * Download button is only disabled once we actually know, so a slow
@@ -270,8 +308,31 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
 
   const [savingEdits, setSavingEdits] = useState(false);
   const [editsError, setEditsError] = useState<string | null>(null);
+  // `useRef`'s initial-value argument is only honored on the mount render
+  // (later renders ignore it, per the hook's own contract), so computing it
+  // from a `useState` lazy initializer — guaranteed by React to run exactly
+  // once — is enough to seed the ref without ever reading or writing
+  // `.current` during render (which `react-hooks/refs` forbids outright,
+  // including the classic "lazy ref init" `if (ref.current == null)`
+  // pattern, under this project's React Compiler config). Without this
+  // seed, the ref starts `null` even when `initialGeneration` already
+  // carries a saved overlay, so the first blur/toggle after loading a
+  // previously-edited job always finds `serialized !== null` and fires a
+  // redundant PATCH that rewrites the same jsonb value the server already
+  // holds.
+  const [initialSavedEdits] = useState<string | null>(() =>
+    initialGeneration
+      ? serializeOverlay(
+          buildEditableGroups(
+            initialGeneration.output,
+            initialGeneration.hallucination,
+            initialGeneration.userEdits,
+          ),
+        )
+      : null,
+  );
   /** The overlay body (stringified) of the last successfully-saved PATCH — lets `persistEdits` skip a no-op write. */
-  const lastSavedEditsRef = useRef<string | null>(null);
+  const lastSavedEditsRef = useRef<string | null>(initialSavedEdits);
   /** Chains every `persistEdits` PATCH after the previous one settles, so concurrent calls (a blur racing a toggle) hit the server strictly in the order they were issued instead of overlapping and letting an older snapshot land last. */
   const pendingEditsRef = useRef<Promise<unknown>>(Promise.resolve());
 
@@ -291,6 +352,14 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
   }, []);
 
   useEffect(() => {
+    // `keepMounted` (`JobDetailTabs`) means this component mounts for
+    // every `/jobs/[id]` view, whether or not the Tailor tab is ever
+    // opened — so gate on there actually being something to download
+    // (`generated`, true from the initial props when a prior tailor
+    // generation exists, or once `handleGenerate` produces one) rather
+    // than firing a contact-info fetch and registering a focus listener
+    // unconditionally on every job-detail page load.
+    if (!generated) return;
     // Deliberately kicked off through the microtask queue rather than called
     // straight from the effect body: `refreshContact` sets state, and doing
     // that synchronously inside an effect is the cascading-render pattern
@@ -306,7 +375,7 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
       clearTimeout(timer);
       window.removeEventListener("focus", onFocus);
     };
-  }, [refreshContact]);
+  }, [refreshContact, generated]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -369,20 +438,11 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
    */
   function persistEdits(nextGroups: EditableGroup[]): Promise<boolean> {
     if (!generationId) return Promise.resolve(true);
-    const editedText: Record<string, string> = {};
-    const excludedPaths: string[] = [];
-    for (const group of nextGroups) {
-      for (const bullet of group.bullets) {
-        if (bullet.text !== bullet.originalText) editedText[bullet.path] = bullet.text;
-        // A hallucination-blocked bullet is never "excluded" by the user —
-        // it's excluded by the current facts, re-derived on every load, so
-        // storing it here would be redundant (and stale once facts change).
-        if (!bullet.included && !bullet.unsupported) excludedPaths.push(bullet.path);
-      }
-    }
-    const overlay = { editedText, excludedPaths };
-    const serialized = JSON.stringify(overlay);
+    const serialized = serializeOverlay(nextGroups);
     if (serialized === lastSavedEditsRef.current) return Promise.resolve(true);
+    // `serialized` is already the exact `{editedText, excludedPaths}` shape
+    // the PATCH body wants — re-parse rather than rebuild it a second time.
+    const overlay = JSON.parse(serialized) as { editedText: Record<string, string>; excludedPaths: string[] };
 
     const run = pendingEditsRef.current.then(async () => {
       setSavingEdits(true);
@@ -428,7 +488,6 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
   }
 
   function toggleBulletIncluded(groupIdx: number, bulletIdx: number) {
-    const previous = groups;
     const next = groups.map((group, g) =>
       g !== groupIdx
         ? group
@@ -441,11 +500,28 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
           },
     );
     setGroups(next);
-    // Optimistic — snap back to `previous` if the server rejects the save
-    // (e.g. the exclude-all guard), so the checkbox never lies about what
-    // is actually persisted.
+    // Optimistic — flip just this bullet's `included` back if the server
+    // rejects the save (e.g. the exclude-all guard), so the checkbox never
+    // lies about what is actually persisted. Rolls back only the bullet
+    // that was toggled, not the whole `groups` snapshot from click time —
+    // restoring the full snapshot would also discard any other bullet's
+    // text edit or exclude toggle made (and possibly already saved, via a
+    // later PATCH chained after this one on `pendingEditsRef`) while this
+    // request was in flight.
     void persistEdits(next).then((ok) => {
-      if (!ok) setGroups(previous);
+      if (ok) return;
+      setGroups((prev) =>
+        prev.map((group, g) =>
+          g !== groupIdx
+            ? group
+            : {
+                ...group,
+                bullets: group.bullets.map((bullet, b) =>
+                  b !== bulletIdx ? bullet : { ...bullet, included: !bullet.included },
+                ),
+              },
+        ),
+      );
     });
   }
 
@@ -453,6 +529,7 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
     if (summary === null || source === null || contactBlocked) return;
     setDownloading(true);
     setDownloadError(null);
+    setRenderer(null);
     try {
       const payload = toTailorPayload(source, summary, skills, groups);
       const res = await fetch(`/api/jobs/${jobId}/pdf`, {
@@ -470,6 +547,9 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
         if (res.status === 422) void refreshContact();
         return;
       }
+      const header = res.headers.get("x-applyops-renderer");
+      setRenderer(header === "latex" ? "latex" : "react-pdf");
+
       const blob = await res.blob();
       const disposition = res.headers.get("Content-Disposition");
       const filename = disposition?.match(/filename="([^"]+)"/)?.[1] ?? "resume.pdf";
@@ -654,6 +734,26 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
               {marking ? "Marking…" : "Mark as applied"}
             </Button>
           </div>
+          {renderer && (
+            <p className="text-xs text-muted-foreground">
+              {renderer === "latex" ? (
+                <>
+                  Rendered from your LaTeX base resume (
+                  <code>x-applyops-renderer: latex</code>) — your own{" "}
+                  <code>.tex</code> with the Technical Skills and Projects blocks
+                  swapped.
+                </>
+              ) : (
+                <>
+                  Rendered from the built-in template (
+                  <code>x-applyops-renderer: react-pdf</code>). The LaTeX pipeline
+                  needs <code>pdflatex</code> on the server and an imported base
+                  resume; the hosted deployment has no TeX distribution, so run{" "}
+                  <code>npm run cli -- pdf</code> locally for the LaTeX version.
+                </>
+              )}
+            </p>
+          )}
           {downloadError && <p className="text-sm text-destructive">{downloadError}</p>}
           {markError && <p className="text-sm text-destructive">{markError}</p>}
         </div>

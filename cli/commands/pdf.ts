@@ -19,6 +19,7 @@ import { isLatexAvailable, renderLatexResume } from "../../src/pdf/latex";
 import { downloadTranscript, getLatexBase } from "../../src/pdf/resume-base";
 import { checkCitations, stripUnsupportedBullets } from "../../src/pipeline/hallucination";
 import { TailorOutput } from "../../src/pipeline/schemas";
+import { applyTailorEdits } from "../../src/pipeline/tailor-edits";
 import { factLabels } from "../../src/pipeline/steps";
 import { getConfirmedFacts } from "../../src/profile/facts";
 import { checkContact } from "../../src/profile/contact";
@@ -111,7 +112,7 @@ export function register(program: Command): void {
         }
 
         const [generation] = await db
-          .select({ id: generations.id, output: generations.output })
+          .select({ id: generations.id, output: generations.output, userEdits: generations.userEdits })
           .from(generations)
           .where(eq(generations.id, generationId))
           .limit(1);
@@ -122,9 +123,16 @@ export function register(program: Command): void {
           );
         }
 
+        // Apply the persisted `tailor_edit` overlay (retyped bullet text,
+        // unchecked bullets — `generations.user_edits`) before rendering, the
+        // same way the web PDF route renders whatever edited output the
+        // Tailor tab posts. Without this a CLI-rendered PDF would silently
+        // ignore every edit the user made in the UI.
+        const edited = applyTailorEdits(parsed.data, generation?.userEdits ?? null);
+
         const facts = await getConfirmedFacts(db, userId);
-        const report = checkCitations(parsed.data, factLabels(facts));
-        const tailor = stripUnsupportedBullets(parsed.data, report);
+        const report = checkCitations(edited, factLabels(facts));
+        const tailor = stripUnsupportedBullets(edited, report);
 
         const [profileRow] = await db
           .select({ contact: profiles.contact })

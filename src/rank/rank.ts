@@ -46,6 +46,53 @@ export function fitRankerVersion(modelId: string): string {
   return `fit-v1:${modelId}`;
 }
 
+/** True for any `fit-v1:<model>` version, regardless of which model. */
+export function isFitRankerVersion(version: string): boolean {
+  return version.startsWith("fit-v1:");
+}
+
+/** The columns {@link pickFitScoreRow} needs from a `job_scores` row. */
+export interface FitScoreRowLike {
+  rankerVersion: string;
+  createdAt: Date;
+}
+
+/**
+ * Picks which `fit-v1:*` `job_scores` row a job detail page should show,
+ * given every fit row for that job+user under any ranker version. The
+ * table's `job_scores_job_user_ranker_uq` index caps this at one row per
+ * (job, user, ranker version) pair, so this only ever chooses *between*
+ * versions, never between two runs of the same one.
+ *
+ * `DEFAULT_MODEL_BY_STEP.fit` has already changed once in production
+ * (commit 6903598), stranding real rows under an older `fit-v1:<model>`
+ * version that a naive `rankerVersion === currentVersion` filter can never
+ * surface again — the row isn't gone, it's just invisible. This prefers a
+ * row scored under `currentVersion` (a fresh re-score always wins) and
+ * falls back to the newest row under any older version — same "newest
+ * usable, fall back rather than collapse" shape `latestGenerationByStep`
+ * (`src/pipeline/generations.ts`) uses for `generations` — rather than
+ * treating the job as never scored at all. `stale: true` tells the caller
+ * the returned row is not from the current ranker, so it can render an
+ * honest "scored under an older model" note instead of passing it off as
+ * current.
+ */
+export function pickFitScoreRow<T extends FitScoreRowLike>(
+  rows: readonly T[],
+  currentVersion: string,
+): { row: T; stale: boolean } | null {
+  const current = rows.find((row) => row.rankerVersion === currentVersion);
+  if (current) return { row: current, stale: false };
+
+  const olderFitRows = rows.filter((row) => isFitRankerVersion(row.rankerVersion));
+  if (olderFitRows.length === 0) return null;
+
+  const newest = [...olderFitRows].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+  )[0];
+  return { row: newest, stale: true };
+}
+
 /** Default batch size for both the CLI (`--max`) and `/api/rank`. */
 export const DEFAULT_MAX_JOBS = 50;
 

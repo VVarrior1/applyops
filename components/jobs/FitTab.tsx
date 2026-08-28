@@ -18,8 +18,14 @@ export interface FitTabProps {
   jobId: string;
   /** Whether `jobs.analysis` was already set when the page loaded. */
   initialAnalyzed: boolean;
-  /** The most recent `fit-v1:<model>` `job_scores` row for this job/user, if any. */
+  /**
+   * The best available `fit-v1:*` `job_scores` row for this job/user, if
+   * any — the current ranker version when one exists, otherwise the newest
+   * row under an older version (`pickFitScoreRow`, `src/rank/rank.ts`).
+   */
   initialFit: FitOutput | null;
+  /** True when `initialFit` was scored under an older fit-ranker version than the current default (`pickFitScoreRow`'s fallback branch), not a fresh re-score. */
+  initialFitStale?: boolean;
   /** The free `keyword-v1` baseline (0–10), shown while nothing has been fit-scored yet. */
   initialKeywordScore: number | null;
 }
@@ -67,9 +73,19 @@ function scoreTone(score: number): string {
  * into two requests so a failed/expensive fit call never hides whether the
  * posting was successfully analyzed.
  */
-export function FitTab({ jobId, initialAnalyzed, initialFit, initialKeywordScore }: FitTabProps) {
+export function FitTab({
+  jobId,
+  initialAnalyzed,
+  initialFit,
+  initialFitStale = false,
+  initialKeywordScore,
+}: FitTabProps) {
   const router = useRouter();
   const [fit, setFit] = useState<FitOutput | null>(initialFit);
+  // Only ever true for `initialFit` — a fresh "Score this job"/"Re-score"
+  // always writes under the current ranker version, so any score set by
+  // `handleScore` below is never stale.
+  const [stale, setStale] = useState(initialFitStale);
   const [scoring, setScoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAllMatched, setShowAllMatched] = useState(false);
@@ -90,6 +106,7 @@ export function FitTab({ jobId, initialAnalyzed, initialFit, initialKeywordScore
       }
       const body = (await fitRes.json()) as { output: FitOutput };
       setFit(body.output);
+      setStale(false);
       setShowAllMatched(false);
       // Refresh server props (plan point 2) — the page-level "worth
       // applying?" verdict badge depends on this job's fit score and only
@@ -128,6 +145,11 @@ export function FitTab({ jobId, initialAnalyzed, initialFit, initialKeywordScore
             <span className={`text-3xl font-semibold ${scoreTone(fit.score)}`}>{fit.score}</span>
             <span className="text-sm text-muted-foreground">/ 100 fit score</span>
           </div>
+          {stale && (
+            <p className="text-sm text-muted-foreground">
+              Scored under an older model — re-score to refresh.
+            </p>
+          )}
 
           <p className="text-sm leading-relaxed">{fit.rationale}</p>
 
