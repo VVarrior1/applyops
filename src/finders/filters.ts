@@ -176,6 +176,14 @@ function normalizeTitle(titleLower: string): string {
  * animators, writers, QA-adjacent production roles).
  */
 const EXCLUDED_ROLE_WORDS = [
+  // Non-software engineering disciplines (energy/construction boards are full of these)
+  /\b(?:pipeline|mechanical|electrical|civil|structural|chemical|process|petroleum|reservoir|drilling|completions|geotechnical|hydraulic|piping|rotating equipment|turbomachinery|hvac|facilities|materials|corrosion|integrity|environmental|mining|industrial|manufacturing|field|project|contact|maintenance|instrumentation|controls?|metallurg\w*|welding|survey\w*|geolog\w*|geophys\w*|nuclear|aerospace|automotive|biomedical|plant|commissioning|construction|estimat\w*) engineer/,
+  /(?<!site )\breliability engineer\b/,
+  /\bengineer(?:ing)?(?:,| -| –)? (?:technologist|technician)\b/,
+  /\bp\.?eng\b/,
+  /\beit\b/,
+  // IT operations / admin roles that say "engineer" but are not software development
+  /\b(?:windows|linux|network|desktop|help ?desk|service desk|systems? administrator|sysadmin|it support|noc|telecom\w*|voip|end[- ]user)\b/,
   /\bparalegal\b/,
   /\blegal\b/,
   /\bcounsel\b/,

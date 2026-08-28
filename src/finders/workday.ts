@@ -38,6 +38,9 @@ const TIMEOUT_MS = 8_000;
 /** Workday's own page size cap for this endpoint is well above 20; kept small
  * on purpose — this is a politeness limit, not a Workday limit. */
 const PAGE_SIZE = 20;
+/** Workday full-text searches run per tenant; hits are de-duplicated by externalPath. */
+const WORKDAY_SEARCH_TERMS = ["software", "developer", "data", "graduate", "engineer"] as const;
+const MAX_POSTINGS_PER_TERM = 100;
 /** Hard cap on postings scanned per tenant per run (spec). */
 const MAX_POSTINGS = 300;
 /** Hard cap on posting-detail fetches per tenant per run — bounds a single
@@ -134,7 +137,7 @@ async function postJson<T>(url: string): Promise<T | null> {
   return parseJsonResponse<T>(res, url);
 }
 
-async function postJsonPage<T>(url: string, limit: number, offset: number): Promise<T | null> {
+async function postJsonPage<T>(url: string, limit: number, offset: number, searchText = ""): Promise<T | null> {
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -142,7 +145,7 @@ async function postJsonPage<T>(url: string, limit: number, offset: number): Prom
       accept: "application/json",
       "user-agent": USER_AGENT,
     },
-    body: JSON.stringify({ appliedFacets: {}, limit, offset, searchText: "" }),
+    body: JSON.stringify({ appliedFacets: {}, limit, offset, searchText }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   return parseJsonResponse<T>(res, url);
@@ -270,18 +273,28 @@ export async function fetchWorkdayJobs(slug: string): Promise<RawJob[]> {
     requests++;
   };
 
+  // Search the tenant for software-ish postings rather than taking the first
+  // MAX_POSTINGS of a 2,000-row bank board. Workday only reports `total` on
+  // the first page (later pages say 0), so never let a later page shrink it.
   const postings: WorkdayPosting[] = [];
-  let offset = 0;
-  let total = Infinity;
-  while (postings.length < MAX_POSTINGS && offset < total) {
-    await throttle();
-    const data = await postJsonPage<WorkdayJobsResponse>(jobsUrl, PAGE_SIZE, offset);
-    const page = data?.jobPostings ?? [];
-    if (page.length === 0) break;
-    postings.push(...page);
-    total = data?.total ?? postings.length;
-    offset += page.length;
-    if (page.length < PAGE_SIZE) break;
+  const seen = new Set<string>();
+  for (const term of WORKDAY_SEARCH_TERMS) {
+    let offset = 0;
+    let total = Infinity;
+    let fromTerm = 0;
+    while (postings.length < MAX_POSTINGS && fromTerm < MAX_POSTINGS_PER_TERM && offset < total) {
+      await throttle();
+      const data = await postJsonPage<WorkdayJobsResponse>(jobsUrl, PAGE_SIZE, offset, term);
+      const page = data?.jobPostings ?? [];
+      if (page.length === 0) break;
+      if (typeof data?.total === "number" && data.total > 0 && total === Infinity) total = data.total;
+      for (const p of page) {
+        const key = p.externalPath ?? p.title ?? "";
+        if (key && !seen.has(key)) { seen.add(key); postings.push(p); fromTerm++; }
+      }
+      offset += page.length;
+      if (page.length < PAGE_SIZE) break;
+    }
   }
 
   const jobs: RawJob[] = [];

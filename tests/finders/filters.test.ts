@@ -258,3 +258,25 @@ describe("detectWorkAuth", () => {
     ).toBe("unclear");
   });
 });
+
+describe("isRelevantRole excludes non-software engineering and IT-ops titles", () => {
+  it.each([
+    "Pipeline Hydraulic Engineer",
+    "Reciprocating Equipment and Turbomachinery Engineer",
+    "Staff Rotating Equipment Engineer",
+    "Mechanical Engineer",
+    "Contact Engineer",
+    "Project Engineer",
+    "Engineering Technologist",
+    "Windows Engineer",
+    "Network Engineer",
+    "Linux Engineer",
+  ])("%s → false", async (t) => {
+    const { isRelevantRole } = await import("../../src/finders/filters");
+    expect(isRelevantRole(t)).toBe(false);
+  });
+  it.each(["Software Engineer", "Automation Engineer, Test", "Site Reliability Engineer", "Platform Engineer", "Data Engineer", "Machine Learning Engineer", "Cloud Engineer"])("%s → true", async (t) => {
+    const { isRelevantRole } = await import("../../src/finders/filters");
+    expect(isRelevantRole(t)).toBe(true);
+  });
+});

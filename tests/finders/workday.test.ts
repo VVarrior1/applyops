@@ -125,11 +125,12 @@ describe("workdayFinder.fetchJobs", () => {
 
     expect(jobs).toHaveLength(2);
 
-    // Exactly one list request and one detail request — the irrelevant title
-    // ("Talent Acquisition Coordinator") must not trigger a detail fetch.
-    expect(seen).toHaveLength(2);
+    // One list request per search term (5) and exactly one detail request —
+    // the irrelevant title ("Talent Acquisition Coordinator") must not trigger
+    // a detail fetch, and duplicate hits across terms are de-duplicated.
+    expect(seen).toHaveLength(6);
     expect(seen[0]).toBe("https://tcenergy.wd3.myworkdayjobs.com/wday/cxs/tcenergy/CAREER_SITE_TC/jobs");
-    expect(seen[1]).toBe(
+    expect(seen[5]).toBe(
       "https://tcenergy.wd3.myworkdayjobs.com/wday/cxs/tcenergy/CAREER_SITE_TC/job/Calgary-Alberta/Automation-Engineer_JR-10643",
     );
 
