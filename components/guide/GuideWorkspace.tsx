@@ -84,7 +84,7 @@ export function GuideWorkspace({
         error={error}
         onRegenerate={() => void handleRegenerate()}
       />
-      <div className="lg:sticky lg:top-6">
+      <div className="lg:sticky lg:top-6 lg:h-[calc(100vh-6rem)]">
         <GuideChat
           initialMessages={chatMessages}
           initialModelId={chatModelId}

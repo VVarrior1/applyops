@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { ModelOption } from "@/src/guide/models";
+import { ChatMarkdown } from "./ChatMarkdown";
 
 /** Mirrors `ChatMessageMetadata` in `app/api/guide/chat/route.ts`. */
 export interface ChatMetadata {
@@ -118,6 +119,16 @@ export function GuideChat({
 
   const busy = status === "submitted" || status === "streaming";
 
+  // The message list is the chat's only scroller (see GuideWorkspace for the
+  // height cap that makes that true); without this, a new reply lands below
+  // the fold and the user has to scroll down to see it themselves.
+  const messagesRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages, status]);
+
   function send(text: string) {
     const question = text.trim();
     if (!question || busy) return;
@@ -133,7 +144,7 @@ export function GuideChat({
   const selected = models.find((model) => model.id === modelId);
 
   return (
-    <div className="flex h-full flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-sm font-semibold">Ask about your search</h2>
@@ -169,7 +180,10 @@ export function GuideChat({
         </p>
       )}
 
-      <div className="flex min-h-64 flex-1 flex-col gap-3 overflow-y-auto rounded-lg border p-3">
+      <div
+        ref={messagesRef}
+        className="flex min-h-64 flex-1 flex-col gap-3 overflow-y-auto rounded-lg border p-3"
+      >
         {messages.length === 0 && (
           <p className="text-sm text-muted-foreground">
             Nothing asked yet. Try one of the questions below.
@@ -189,14 +203,23 @@ export function GuideChat({
             >
               <div
                 className={
-                  "max-w-[92%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap " +
+                  "max-w-[92%] rounded-lg px-3 py-2 text-sm " +
                   (message.role === "user"
-                    ? "bg-primary text-primary-foreground"
+                    ? "whitespace-pre-wrap bg-primary text-primary-foreground"
                     : "bg-muted text-foreground")
                 }
               >
-                {text ||
-                  (busy && message.role === "assistant" ? "Thinking…" : "")}
+                {message.role === "assistant" ? (
+                  text ? (
+                    <ChatMarkdown text={text} />
+                  ) : busy ? (
+                    "Thinking…"
+                  ) : (
+                    ""
+                  )
+                ) : (
+                  text
+                )}
               </div>
               {message.role === "assistant" && cost != null && (
                 <span className="text-[10px] text-muted-foreground">
