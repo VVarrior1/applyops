@@ -9,18 +9,11 @@
  * without one.
  */
 
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import type { Db } from "../db/client";
-import {
-  applications,
-  chatMessages,
-  chatThreads,
-  generations,
-  guides,
-  outcomeEvents,
-  promptVersions,
-} from "../db/schema";
-import { deriveFunnel, type FunnelApplication } from "../funnel/derive";
+import { chatMessages, chatThreads, guides } from "../db/schema";
+import { deriveFunnel } from "../funnel/derive";
+import { loadFunnelApplications } from "../funnel/query";
 import { COST_DECIMALS } from "../llm/pricing";
 import type { GuideFunnel } from "../pipeline/steps/guide";
 import type { GuideOutput } from "../pipeline/schemas";
@@ -236,50 +229,13 @@ export async function loadUserFunnel(
   db: Db,
   userId: string,
 ): Promise<GuideFunnel | null> {
-  const appRows = await db
-    .select({
-      id: applications.id,
-      createdAt: applications.createdAt,
-      promptVersion: promptVersions.version,
-    })
-    .from(applications)
-    .leftJoin(generations, eq(applications.tailorGenerationId, generations.id))
-    .leftJoin(promptVersions, eq(generations.promptVersionId, promptVersions.id))
-    .where(eq(applications.userId, userId));
+  // Non-placeholder applications only — see src/funnel/query.ts on why a
+  // v1-migration orphan application must never inflate the guide's funnel
+  // (it must agree with /funnel and the public /results page).
+  const funnelApplications = await loadFunnelApplications(db, userId);
+  if (funnelApplications.length === 0) return null;
 
-  if (appRows.length === 0) return null;
-
-  const events = await db
-    .select({
-      applicationId: outcomeEvents.applicationId,
-      type: outcomeEvents.type,
-      occurredAt: outcomeEvents.occurredAt,
-    })
-    .from(outcomeEvents)
-    .where(
-      inArray(
-        outcomeEvents.applicationId,
-        appRows.map((row) => row.id),
-      ),
-    );
-
-  const byApplication = new Map<string, FunnelApplication["events"]>();
-  for (const event of events) {
-    const entry = { type: event.type, occurredAt: event.occurredAt };
-    const bucket = byApplication.get(event.applicationId);
-    if (bucket) bucket.push(entry);
-    else byApplication.set(event.applicationId, [entry]);
-  }
-
-  const [row] = deriveFunnel(
-    appRows.map((app) => ({
-      id: app.id,
-      createdAt: app.createdAt,
-      promptVersion: app.promptVersion,
-      events: byApplication.get(app.id) ?? [],
-    })),
-    { groupBy: "all" },
-  );
+  const [row] = deriveFunnel(funnelApplications, { groupBy: "all" });
 
   if (!row) return null;
   return {

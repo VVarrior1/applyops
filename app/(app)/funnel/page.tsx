@@ -1,14 +1,8 @@
 import Link from "next/link";
-import { eq, inArray } from "drizzle-orm";
 import { requireUser } from "@/src/auth/require";
 import { getDb } from "@/src/db/client";
-import {
-  applications,
-  generations,
-  outcomeEvents,
-  promptVersions,
-} from "@/src/db/schema";
-import { deriveFunnel, type FunnelApplication, type FunnelGroupBy } from "@/src/funnel/derive";
+import { deriveFunnel, type FunnelGroupBy } from "@/src/funnel/derive";
+import { loadFunnelApplications } from "@/src/funnel/query";
 import { FunnelChart } from "@/components/funnel/FunnelChart";
 import {
   Table,
@@ -54,48 +48,9 @@ export default async function FunnelPage({
 
   const db = getDb();
 
-  const appRows = await db
-    .select({
-      id: applications.id,
-      createdAt: applications.createdAt,
-      promptVersion: promptVersions.version,
-    })
-    .from(applications)
-    .leftJoin(generations, eq(applications.tailorGenerationId, generations.id))
-    .leftJoin(promptVersions, eq(generations.promptVersionId, promptVersions.id))
-    .where(eq(applications.userId, user.id));
-
-  const events =
-    appRows.length === 0
-      ? []
-      : await db
-          .select({
-            applicationId: outcomeEvents.applicationId,
-            type: outcomeEvents.type,
-            occurredAt: outcomeEvents.occurredAt,
-          })
-          .from(outcomeEvents)
-          .where(
-            inArray(
-              outcomeEvents.applicationId,
-              appRows.map((row) => row.id),
-            ),
-          );
-
-  const eventsByApplication = new Map<string, FunnelApplication["events"]>();
-  for (const event of events) {
-    const bucket = eventsByApplication.get(event.applicationId);
-    const entry = { type: event.type, occurredAt: event.occurredAt };
-    if (bucket) bucket.push(entry);
-    else eventsByApplication.set(event.applicationId, [entry]);
-  }
-
-  const funnelApplications: FunnelApplication[] = appRows.map((row) => ({
-    id: row.id,
-    createdAt: row.createdAt,
-    promptVersion: row.promptVersion,
-    events: eventsByApplication.get(row.id) ?? [],
-  }));
+  // Non-placeholder applications only — see src/funnel/query.ts on why a
+  // v1-migration orphan application must never inflate this page's counts.
+  const funnelApplications = await loadFunnelApplications(db, user.id);
 
   const rows = deriveFunnel(funnelApplications, { groupBy });
 

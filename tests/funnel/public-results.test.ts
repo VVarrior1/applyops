@@ -1,6 +1,13 @@
-import { describe, it, expect } from "vitest";
-import { computeGateStatus } from "../../src/funnel/public-results";
+import { describe, it, expect, vi } from "vitest";
+import { applications, jobs, outcomeEvents, profiles } from "../../src/db/schema";
+import type { Db } from "../../src/db/client";
+import { computeGateStatus, loadPublicResults } from "../../src/funnel/public-results";
 import type { EvalRunListItem } from "../../src/eval/runner";
+
+// `loadPublicResults` also reads `eval_runs` via `listEvalRuns` — out of
+// scope for the placeholder-filter test below, so it's stubbed to "no runs"
+// rather than modelled in the fake `Db`.
+vi.mock("../../src/eval/runner", () => ({ listEvalRuns: vi.fn(async () => []) }));
 
 /**
  * Pins `computeGateStatus`'s thresholds against Task 12's real
@@ -97,5 +104,111 @@ describe("computeGateStatus", () => {
     );
     expect(result.status).toBe("fail");
     expect(result.reasons).toHaveLength(2);
+  });
+});
+
+/**
+ * A fake `Db` covering exactly the tables `loadPublicResults` touches
+ * (`profiles`, the `applications`/`jobs`/`generations`/`promptVersions`
+ * join, `outcome_events`, and the `jobs`/`companies` lookup for recent
+ * applications). The `applications`+`jobs` join applies the real
+ * `is_placeholder = false` filter itself — mirroring, at the JS level, the
+ * SQL `tests/funnel/query.test.ts` separately proves `ownerApplicationRows`
+ * actually generates — so this test's job is verifying `loadPublicResults`
+ * never re-surfaces an excluded application through some other path (e.g.
+ * the separate `jobs` lookup below), not re-proving the SQL exists.
+ */
+function fakeResultsDb(fixture: {
+  ownerId: string;
+  applicationRows: { id: string; userId: string; jobId: string; createdAt: Date }[];
+  jobRows: { id: string; title: string; companyId: string | null; isPlaceholder: boolean }[];
+  companyRows: { id: string; name: string }[];
+  eventRows: { applicationId: string; type: string; occurredAt: Date }[];
+}) {
+  const db = {
+    select() {
+      return {
+        from(table: unknown) {
+          if (table === profiles) {
+            return { where: () => ({ limit: async () => [{ userId: fixture.ownerId }] }) };
+          }
+          if (table === applications) {
+            return {
+              innerJoin: () => ({
+                leftJoin: () => ({
+                  leftJoin: () => ({
+                    where: async () =>
+                      fixture.applicationRows
+                        .filter((a) => a.userId === fixture.ownerId)
+                        .filter((a) => fixture.jobRows.some((j) => j.id === a.jobId && !j.isPlaceholder))
+                        .map((a) => ({ id: a.id, createdAt: a.createdAt, jobId: a.jobId, promptVersion: null })),
+                  }),
+                }),
+              }),
+            };
+          }
+          if (table === outcomeEvents) {
+            return { where: async () => fixture.eventRows };
+          }
+          if (table === jobs) {
+            return {
+              leftJoin: () => ({
+                where: async () =>
+                  fixture.jobRows.map((j) => ({
+                    id: j.id,
+                    title: j.title,
+                    companyName: fixture.companyRows.find((c) => c.id === j.companyId)?.name ?? null,
+                  })),
+              }),
+            };
+          }
+          throw new Error(`fakeResultsDb: unexpected table in select().from()`);
+        },
+      };
+    },
+  };
+  return db as unknown as Db;
+}
+
+describe("loadPublicResults", () => {
+  it("excludes an application on an isPlaceholder job from both the funnel and recent applications", async () => {
+    const db = fakeResultsDb({
+      ownerId: "owner-1",
+      jobRows: [
+        { id: "job-real", title: "Backend Engineer", companyId: "co-1", isPlaceholder: false },
+        { id: "job-orphan", title: "Unknown position (v1 job abc)", companyId: "co-2", isPlaceholder: true },
+      ],
+      companyRows: [
+        { id: "co-1", name: "Real Co" },
+        { id: "co-2", name: "Unknown (v1 orphaned job)" },
+      ],
+      applicationRows: [
+        { id: "app-real", userId: "owner-1", jobId: "job-real", createdAt: new Date("2026-08-01T00:00:00Z") },
+        { id: "app-orphan", userId: "owner-1", jobId: "job-orphan", createdAt: new Date("2025-11-01T00:00:00Z") },
+      ],
+      eventRows: [
+        { applicationId: "app-real", type: "applied", occurredAt: new Date("2026-08-01T00:00:00Z") },
+        { applicationId: "app-orphan", type: "applied", occurredAt: new Date("2025-11-01T00:00:00Z") },
+      ],
+    });
+
+    const results = await loadPublicResults(db);
+
+    expect(results).not.toBeNull();
+    const totalApplied = results!.funnelByWeek.reduce((sum, row) => sum + row.applied, 0);
+    expect(totalApplied).toBe(1); // only the real job's application counted
+    expect(results!.recentApplications).toHaveLength(1);
+    expect(results!.recentApplications[0]?.roleFamily).not.toMatch(/unknown/i);
+  });
+
+  it("returns null when there is no owner profile", async () => {
+    const db = {
+      select() {
+        return { from: () => ({ where: () => ({ limit: async () => [] }) }) };
+      },
+    } as unknown as Db;
+
+    const results = await loadPublicResults(db);
+    expect(results).toBeNull();
   });
 });

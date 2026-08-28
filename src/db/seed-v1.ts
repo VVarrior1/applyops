@@ -48,7 +48,7 @@ const V1_DATA_DIR = process.env.V1_DATA_DIR ?? "/Users/abdu/Job_Auto_Apply/data"
 const V1_JOBS_CSV = path.join(V1_DATA_DIR, "jobs.csv");
 const V1_APPLICATIONS_CSV = path.join(V1_DATA_DIR, "applications.csv");
 
-interface V1JobRow {
+export interface V1JobRow {
   id: string;
   url: string;
   title: string;
@@ -66,7 +66,7 @@ interface V1JobRow {
   analysis: string;
 }
 
-interface V1ApplicationRow {
+export interface V1ApplicationRow {
   id: string;
   job_id: string;
   tailored_summary: string;
@@ -97,7 +97,7 @@ function toBool(value: string | undefined): boolean | undefined {
   return value === "true" || value === "TRUE" || value === "1";
 }
 
-type Db = PostgresJsDatabase<typeof schema>;
+export type Db = PostgresJsDatabase<typeof schema>;
 
 /** Upsert a company by name, case-insensitively, in a single atomic
  * statement — relies on the `companies_name_lower_uq` unique index on
@@ -179,70 +179,37 @@ async function ensureOwnerProfile(db: Db, userId: string): Promise<void> {
   await db.insert(profiles).values({ userId, isOwner: true });
 }
 
-async function main() {
-  if (!fs.existsSync(V1_DATA_DIR)) {
-    console.log(
-      `[seed-v1] V1_DATA_DIR (${V1_DATA_DIR}) does not exist on this machine; skipping v1 seed. ` +
-        `Set V1_DATA_DIR to point at a checkout of Job_Auto_Apply/data to run it.`,
-    );
-    process.exit(0);
-  }
+export interface SeedApplicationsInput {
+  ownerId: string;
+  appRows: readonly V1ApplicationRow[];
+  /** v1 job_id -> its jobs.csv row (status, applied_at, ...). */
+  v1JobIdToRow: Map<string, V1JobRow>;
+  /** v1 job_id -> the DB job id it resolved to; mutated in place as orphan placeholders are created. */
+  v1JobIdToDbId: Map<string, string>;
+  companyCache: Map<string, string>;
+}
 
-  const db = getDirectDb();
+export interface SeedApplicationsResult {
+  applicationsCreated: number;
+  orphanedPlaceholderJobs: number;
+}
 
-  const ownerEmail = process.env.OWNER_EMAIL;
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!ownerEmail) throw new Error("OWNER_EMAIL is not set (check .env.local)");
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error(
-      "NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set (check .env.local)",
-    );
-  }
-
-  console.log(`[seed-v1] Reading ${V1_JOBS_CSV} and ${V1_APPLICATIONS_CSV} ...`);
-  const jobRows = readCsv<V1JobRow>(V1_JOBS_CSV);
-  const appRows = readCsv<V1ApplicationRow>(V1_APPLICATIONS_CSV);
-  console.log(
-    `[seed-v1] ${jobRows.length} v1 job rows, ${appRows.length} v1 application rows.`,
-  );
-
-  // --- Jobs + companies ------------------------------------------------
-  const companyCache = new Map<string, string>();
-  const v1JobIdToDbId = new Map<string, string>();
-  const v1JobIdToRow = new Map<string, V1JobRow>();
-  const upsertedUrls = new Set<string>();
-
-  for (const row of jobRows) {
-    if (!row.id || !row.url || !row.title || !row.company) {
-      console.warn(`[seed-v1] skipping job row missing id/url/title/company: ${row.id ?? "(no id)"}`);
-      continue;
-    }
-    v1JobIdToRow.set(row.id, row);
-
-    const companyId = await upsertCompanyByName(db, companyCache, row.company);
-    const dbId = await upsertJobByUrl(db, row.url, {
-      companyId,
-      title: row.title,
-      location: row.location || null,
-      remote: toBool(row.remote),
-      description: row.description || null,
-      postedAt: toDate(row.posted_at),
-      scrapedAt: toDate(row.scraped_at),
-      lastSeenAt: toDate(row.scraped_at),
-    });
-    v1JobIdToDbId.set(row.id, dbId);
-    upsertedUrls.add(row.url);
-  }
-
-  // --- Owner profile -----------------------------------------------------
-  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-  const ownerId = await ensureAuthUser(supabaseAdmin, ownerEmail);
-  await ensureOwnerProfile(db, ownerId);
-
-  // --- Applications + outcome events -------------------------------------
+/**
+ * Inserts one `applications` row (+ its `outcome_events`) per v1 CSV
+ * (user, job) pair — pulled out of `main()` so
+ * `tests/db/seed-v1.test.ts` can pin the dedupe rule against a fake `Db`
+ * without a live Postgres connection: v1 logged one `applications.csv` row
+ * per resume *regeneration*, not per real application (one real Databricks
+ * application had 6 byte-identical rows in production), and the DB-backed
+ * `existing.length > 0` check below — keyed on (userId, jobId) only, not
+ * createdAt — keeps just the first (earliest, since `appRows` is processed
+ * in CSV order) and skips the rest, matching the `applications_user_job_uq`
+ * constraint (drizzle/0015) exactly one row per (user, job) enforces.
+ */
+export async function seedApplications(
+  db: Db,
+  { ownerId, appRows, v1JobIdToRow, v1JobIdToDbId, companyCache }: SeedApplicationsInput,
+): Promise<SeedApplicationsResult> {
   let applicationsCreated = 0;
   let orphanedPlaceholderJobs = 0;
 
@@ -353,6 +320,81 @@ async function main() {
     }
   }
 
+  return { applicationsCreated, orphanedPlaceholderJobs };
+}
+
+async function main() {
+  if (!fs.existsSync(V1_DATA_DIR)) {
+    console.log(
+      `[seed-v1] V1_DATA_DIR (${V1_DATA_DIR}) does not exist on this machine; skipping v1 seed. ` +
+        `Set V1_DATA_DIR to point at a checkout of Job_Auto_Apply/data to run it.`,
+    );
+    process.exit(0);
+  }
+
+  const db = getDirectDb();
+
+  const ownerEmail = process.env.OWNER_EMAIL;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!ownerEmail) throw new Error("OWNER_EMAIL is not set (check .env.local)");
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error(
+      "NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not set (check .env.local)",
+    );
+  }
+
+  console.log(`[seed-v1] Reading ${V1_JOBS_CSV} and ${V1_APPLICATIONS_CSV} ...`);
+  const jobRows = readCsv<V1JobRow>(V1_JOBS_CSV);
+  const appRows = readCsv<V1ApplicationRow>(V1_APPLICATIONS_CSV);
+  console.log(
+    `[seed-v1] ${jobRows.length} v1 job rows, ${appRows.length} v1 application rows.`,
+  );
+
+  // --- Jobs + companies ------------------------------------------------
+  const companyCache = new Map<string, string>();
+  const v1JobIdToDbId = new Map<string, string>();
+  const v1JobIdToRow = new Map<string, V1JobRow>();
+  const upsertedUrls = new Set<string>();
+
+  for (const row of jobRows) {
+    if (!row.id || !row.url || !row.title || !row.company) {
+      console.warn(`[seed-v1] skipping job row missing id/url/title/company: ${row.id ?? "(no id)"}`);
+      continue;
+    }
+    v1JobIdToRow.set(row.id, row);
+
+    const companyId = await upsertCompanyByName(db, companyCache, row.company);
+    const dbId = await upsertJobByUrl(db, row.url, {
+      companyId,
+      title: row.title,
+      location: row.location || null,
+      remote: toBool(row.remote),
+      description: row.description || null,
+      postedAt: toDate(row.posted_at),
+      scrapedAt: toDate(row.scraped_at),
+      lastSeenAt: toDate(row.scraped_at),
+    });
+    v1JobIdToDbId.set(row.id, dbId);
+    upsertedUrls.add(row.url);
+  }
+
+  // --- Owner profile -----------------------------------------------------
+  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const ownerId = await ensureAuthUser(supabaseAdmin, ownerEmail);
+  await ensureOwnerProfile(db, ownerId);
+
+  // --- Applications + outcome events -------------------------------------
+  const { applicationsCreated, orphanedPlaceholderJobs } = await seedApplications(db, {
+    ownerId,
+    appRows,
+    v1JobIdToRow,
+    v1JobIdToDbId,
+    companyCache,
+  });
+
   if (orphanedPlaceholderJobs > 0) {
     console.log(
       `[seed-v1] created ${orphanedPlaceholderJobs} placeholder job(s) for orphaned v1 application->job references.`,
@@ -363,7 +405,13 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
-  console.error("[seed-v1] failed:", err);
-  process.exit(1);
-});
+// Only run `main()` (which can call `process.exit()`) when this file is
+// executed directly (`tsx src/db/seed-v1.ts`) — not when
+// `tests/db/seed-v1.test.ts` imports `seedApplications` from it, which
+// would otherwise kill the whole test process the moment this module loads.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error("[seed-v1] failed:", err);
+    process.exit(1);
+  });
+}

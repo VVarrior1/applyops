@@ -29,6 +29,47 @@ JOIN survivors s ON s.user_id = a.user_id AND s.job_id = a.job_id
 WHERE oe.application_id = a.id
   AND a.id <> s.id;--> statement-breakpoint
 
+-- `approvals.application_id` is also a NOT NULL FK onto `applications.id`
+-- (src/db/schema.ts), same as outcome_events above — re-point it off any
+-- duplicate onto the survivor for the same reason, otherwise the DELETE
+-- below aborts on FK violation the moment a duplicate has an approvals row.
+WITH survivors AS (
+  SELECT DISTINCT ON (user_id, job_id) id, user_id, job_id
+  FROM "applications"
+  ORDER BY user_id, job_id, created_at ASC, id ASC
+)
+UPDATE "approvals" ap
+SET application_id = s.id
+FROM "applications" a
+JOIN survivors s ON s.user_id = a.user_id AND s.job_id = a.job_id
+WHERE ap.application_id = a.id
+  AND a.id <> s.id;--> statement-breakpoint
+
+-- The survivor (earliest-created duplicate) is not necessarily the one that
+-- carries `tailor_generation_id` / `resume_pdf_path` — a later regeneration
+-- row often does. Backfill those two fields onto the survivor from the most
+-- recent duplicate that has a value, before the dropped rows (and whatever
+-- they point to) are gone for good. Known-lossy either way: if more than
+-- one duplicate has a value, only the newest one's is kept — acceptable
+-- here since these are cosmetic/attribution fields, not outcome history.
+WITH survivors AS (
+  SELECT DISTINCT ON (user_id, job_id) id, user_id, job_id
+  FROM "applications"
+  ORDER BY user_id, job_id, created_at ASC, id ASC
+), newest_with_value AS (
+  SELECT DISTINCT ON (a.user_id, a.job_id)
+    a.user_id, a.job_id, a.tailor_generation_id, a.resume_pdf_path
+  FROM "applications" a
+  WHERE a.tailor_generation_id IS NOT NULL OR a.resume_pdf_path IS NOT NULL
+  ORDER BY a.user_id, a.job_id, a.created_at DESC, a.id DESC
+)
+UPDATE "applications" s
+SET tailor_generation_id = COALESCE(s.tailor_generation_id, n.tailor_generation_id),
+    resume_pdf_path = COALESCE(s.resume_pdf_path, n.resume_pdf_path)
+FROM survivors sv
+JOIN newest_with_value n ON n.user_id = sv.user_id AND n.job_id = sv.job_id
+WHERE s.id = sv.id;--> statement-breakpoint
+
 WITH survivors AS (
   SELECT DISTINCT ON (user_id, job_id) id, user_id, job_id
   FROM "applications"

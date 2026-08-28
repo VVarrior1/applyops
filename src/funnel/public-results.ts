@@ -34,20 +34,13 @@
  *     history.
  */
 
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/client";
-import {
-  applications,
-  companies,
-  generations,
-  jobs,
-  outcomeEvents,
-  profiles,
-  promptVersions,
-} from "../db/schema";
+import { companies, jobs, profiles } from "../db/schema";
 import { defaultModelForStep } from "../llm/defaults";
 import { listEvalRuns, type EvalRunListItem } from "../eval/runner";
-import { currentStage, deriveFunnel, type ApplicationStage, type FunnelApplication, type FunnelRow } from "./derive";
+import { currentStage, deriveFunnel, type ApplicationStage, type FunnelRow } from "./derive";
+import { attachFunnelEvents, ownerApplicationRows } from "./query";
 import { redactCompanies, roleFamily } from "./redact";
 
 /** Same step `/evals` (Task 11) fixes its trend chart to — see file header. */
@@ -192,55 +185,14 @@ export async function loadPublicResults(db: Db): Promise<PublicResults | null> {
     .limit(1);
   if (!owner) return null;
 
-  // --- Funnel: same shape as app/(app)/funnel/page.tsx, scoped to the owner. ---
-  // Joined to `jobs` (inner) and filtered on `isPlaceholder` so v1-migration
-  // orphan rows (no real posting behind them) never inflate the public
-  // funnel counts or surface as a "Company #n" / role-family row below —
-  // see src/db/schema.ts on `jobs.isPlaceholder`.
-  const appRows = await db
-    .select({
-      id: applications.id,
-      createdAt: applications.createdAt,
-      jobId: applications.jobId,
-      promptVersion: promptVersions.version,
-    })
-    .from(applications)
-    .innerJoin(jobs, eq(applications.jobId, jobs.id))
-    .leftJoin(generations, eq(applications.tailorGenerationId, generations.id))
-    .leftJoin(promptVersions, eq(generations.promptVersionId, promptVersions.id))
-    .where(and(eq(applications.userId, owner.userId), eq(jobs.isPlaceholder, false)));
-
-  const events =
-    appRows.length === 0
-      ? []
-      : await db
-          .select({
-            applicationId: outcomeEvents.applicationId,
-            type: outcomeEvents.type,
-            occurredAt: outcomeEvents.occurredAt,
-          })
-          .from(outcomeEvents)
-          .where(
-            inArray(
-              outcomeEvents.applicationId,
-              appRows.map((row) => row.id),
-            ),
-          );
-
-  const eventsByApplication = new Map<string, FunnelApplication["events"]>();
-  for (const event of events) {
-    const bucket = eventsByApplication.get(event.applicationId);
-    const entry = { type: event.type, occurredAt: event.occurredAt };
-    if (bucket) bucket.push(entry);
-    else eventsByApplication.set(event.applicationId, [entry]);
-  }
-
-  const funnelApplications: FunnelApplication[] = appRows.map((row) => ({
-    id: row.id,
-    createdAt: row.createdAt,
-    promptVersion: row.promptVersion,
-    events: eventsByApplication.get(row.id) ?? [],
-  }));
+  // --- Funnel: same query src/funnel/query.ts's ownerApplicationRows uses
+  // for app/(app)/funnel/page.tsx and the guide's loadUserFunnel — inner-
+  // joined to `jobs` and filtered on `isPlaceholder` so v1-migration orphan
+  // rows (no real posting behind them) never inflate the public funnel
+  // counts or surface as a "Company #n" / role-family row below.
+  const appRows = await ownerApplicationRows(db, owner.userId);
+  const funnelApplications = await attachFunnelEvents(db, appRows);
+  const eventsByApplication = new Map(funnelApplications.map((row) => [row.id, row.events]));
 
   const funnelByWeek = deriveFunnel(funnelApplications, { groupBy: "week" });
   const funnelByPromptVersion = deriveFunnel(funnelApplications, { groupBy: "prompt_version" });
