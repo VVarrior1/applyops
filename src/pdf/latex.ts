@@ -59,6 +59,7 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { isProjectsHeading, soleSection } from "./headings";
 import type { TailorOutput } from "../pipeline/schemas";
 
 const execFileAsync = promisify(execFile);
@@ -752,7 +753,7 @@ export function deriveProjectsFromSections(
   tailor: TailorOutput,
   baseProjects: readonly BaseProject[],
 ): ResolvedProject[] {
-  const section = tailor.sections.find((s) => /project/i.test(s.heading));
+  const section = soleSection(tailor.sections, isProjectsHeading);
   const bullets = section?.bullets.map((b) => b.text) ?? [];
   if (bullets.length === 0 || baseProjects.length === 0) return [];
 

@@ -69,6 +69,7 @@ import {
   latexToPlain,
   readBalancedGroup,
 } from "./latex";
+import { isExperienceHeading, isProjectsHeading, soleSection } from "./headings";
 import type { CitedBullet, TailorOutput } from "../pipeline/schemas";
 
 /** The most bullets a derived experience entry gets — mirrors the prompt's cap. */
@@ -92,7 +93,18 @@ export interface BaseExperienceEntry {
 // Reading the base resume's Experience section
 // ---------------------------------------------------------------------------
 
-const EXPERIENCE_SECTION_REGEX = /\\section\s*\{\s*Experience\s*\}/i;
+/**
+ * The heading that opens the base's employment history.
+ *
+ * The qualifiers are not decoration: a resume headed `\section{Work
+ * Experience}` used to yield `experienceRegion() === null`, so
+ * `extractBaseExperience()` returned `[]` and the whole enrichment silently
+ * did nothing — no dates on the PDF and no diagnostic anywhere. Kept in step
+ * with {@link isExperienceHeading}, which accepts the same qualifiers on the
+ * *tailor* side.
+ */
+const EXPERIENCE_SECTION_REGEX =
+  /\\section\s*\{\s*(?:work\s+|professional\s+|employment\s+)?Experience\s*\}/i;
 const LIST_START = "\\resumeSubHeadingListStart";
 const LIST_END = "\\resumeSubHeadingListEnd";
 const SUBHEADING = "\\resumeSubheading";
@@ -246,9 +258,50 @@ function orgTokens(text: string): string[] {
   ];
 }
 
+/** Both names normalize to the same string — the same employer, written twice. */
+const EXACT_SCORE = 1000;
+/** One whole name contains the other: `Google` ⊂ `Google Innovate Program…`. */
+const CONTAINMENT_SCORE = 500;
+/** Per distinctive word the two names share. */
+const TOKEN_SCORE = 100;
+
+/**
+ * The weakest evidence {@link pairWithBase} will pair on: a whole-name
+ * containment, or **two** distinct shared words. One shared word is not
+ * evidence of an employer.
+ *
+ * QA reproduced the damage against the owner's real base resume: it holds a
+ * `City of Calgary` row, and a tailored entry for a different employer whose
+ * name happens to contain the same city — `Calgary Co-op`, or `University of
+ * Calgary` — scored 100 on the single token `calgary`, which the old `score >
+ * 0` test accepted. The PDF then printed *Calgary Co-op · Calgary, AB ·
+ * September 2025 – Present*: the City of Calgary's dates and office against a
+ * company the candidate never worked for. Every string on the page is real,
+ * which is precisely why nothing downstream catches it.
+ */
+export const MIN_MATCH_SCORE = 2 * TOKEN_SCORE;
+
+/**
+ * Whole-word containment over normalized (space-separated) names.
+ *
+ * A plain `includes()` has no word boundaries, so a short organization name
+ * matches inside an unrelated one — `Ada` inside `Canada Post`, `Ibm` inside
+ * `Wasabi Mbank`. Padding both sides with a space turns the substring test
+ * into a word-boundary test for free, and names shorter than
+ * {@link MIN_CONTAINMENT_LENGTH} are refused outright: a two-letter token is
+ * an initialism collision waiting to happen.
+ */
+const MIN_CONTAINMENT_LENGTH = 3;
+
+function containsAsWords(hay: string, needle: string): boolean {
+  if (needle.length < MIN_CONTAINMENT_LENGTH) return false;
+  return ` ${hay} `.includes(` ${needle} `);
+}
+
 /**
  * How strongly a tailored entry and a base entry describe the same job.
- * `0` means "no evidence at all" and never matches.
+ * `0` means "no evidence at all", and anything below
+ * {@link MIN_MATCH_SCORE} never matches.
  *
  * ## Only the organization can establish a match
  *
@@ -279,16 +332,18 @@ export function scoreEntryMatch(
   const baseRole = normalize(base.role);
   if (!org) return 0;
 
-  if (org === baseOrg || org === baseRole) return 1000;
+  if (org === baseOrg || org === baseRole) return EXACT_SCORE;
 
   let score = 0;
   for (const hay of [baseOrg, baseRole]) {
     if (!hay) continue;
-    if (org.includes(hay) || hay.includes(org)) score = Math.max(score, 500);
+    if (containsAsWords(org, hay) || containsAsWords(hay, org)) {
+      score = Math.max(score, CONTAINMENT_SCORE);
+    }
   }
 
   const baseHay = orgTokens(`${base.organization} ${base.role}`);
-  score += orgTokens(candidate.organization).filter((t) => baseHay.includes(t)).length * 100;
+  score += orgTokens(candidate.organization).filter((t) => baseHay.includes(t)).length * TOKEN_SCORE;
 
   // No organization evidence, no match — the title never gets a vote of its own.
   if (score === 0) return 0;
@@ -304,6 +359,12 @@ export function scoreEntryMatch(
  * entry") because per-entry is order-dependent: a weak first entry can claim
  * the base row a later entry matches exactly, and the exact match is then left
  * with nothing.
+ *
+ * Only scores of at least {@link MIN_MATCH_SCORE} are pairs at all — see that
+ * constant for the wrong-employer bug a `> 0` test shipped. The role
+ * tie-breaker cannot lift a one-token match over the bar: it adds a single
+ * point per shared title word, so a lone shared organization word tops out at
+ * 100-and-change against a threshold of 200.
  */
 function pairWithBase(
   candidates: readonly { organization: string; role?: string }[],
@@ -313,7 +374,7 @@ function pairWithBase(
   candidates.forEach((candidate, ci) => {
     base.forEach((entry, bi) => {
       const score = scoreEntryMatch(candidate, entry);
-      if (score > 0) pairs.push({ candidate: ci, base: bi, score });
+      if (score >= MIN_MATCH_SCORE) pairs.push({ candidate: ci, base: bi, score });
     });
   });
   pairs.sort(
@@ -364,9 +425,6 @@ export function enrichExperience(
   });
 }
 
-const EXPERIENCE_HEADING = /^(work\s+)?experience$/i;
-const PROJECTS_HEADING = /project/i;
-
 /**
  * Rebuilds an employment history for a legacy tailor row — one with a loose
  * `sections: [{heading: "Experience", …}]` list and no `experience` field.
@@ -412,7 +470,7 @@ export function deriveExperienceFromSections(
   tailor: TailorOutput,
   base: readonly BaseExperienceEntry[],
 ): NonNullable<TailorOutput["experience"]> {
-  const section = tailor.sections.find((s) => EXPERIENCE_HEADING.test(s.heading.trim()));
+  const section = soleSection(tailor.sections, isExperienceHeading);
   const bullets = section?.bullets ?? [];
   if (bullets.length === 0 || base.length === 0) return [];
 
@@ -474,6 +532,23 @@ export function deriveExperienceFromSections(
  * `latexToPlain()` reduces `\textbf{\href{…}{\textcolor{myblue}{CYD Soccer}}}
  * $|$ \emph{Next.js, Supabase}` to `CYD Soccer $|$ Next.js, Supabase`, and
  * `$|$` is the template's own separator, untouched by that reduction.
+ *
+ * ## All or nothing, exactly as the experience side is
+ *
+ * `deriveProjectsFromSections()` places what it can and lets the rest fall on
+ * the floor: leftover bullets are dealt only to base projects that are *still
+ * empty*, so a row with more loose bullets than the base has projects (or more
+ * than `MAX_BULLETS_PER_PROJECT` for one of them) ends up with bullets
+ * assigned nowhere. That is harmless in the LaTeX renderer, which keeps the
+ * base's own Projects block either way — but here the returned array populates
+ * `tailor.projects`, and `extraSections()` then drops the loose "Projects"
+ * section that still held the strays. QA reproduced six loose bullets going in
+ * and four coming out of the react-pdf page, with two silently deleted.
+ *
+ * So if a single bullet is unplaced, this returns `[]`, the loose section
+ * stays exactly where it was, and every bullet the generation produced is
+ * still on the page — the same rule, and the same reasoning, as
+ * {@link deriveExperienceFromSections}.
  */
 export function deriveProjectsForTemplate(
   tailor: TailorOutput,
@@ -482,7 +557,7 @@ export function deriveProjectsForTemplate(
   const baseProjects = extractBaseProjects(baseLatex);
   if (baseProjects.length === 0) return [];
 
-  const section = tailor.sections.find((s) => PROJECTS_HEADING.test(s.heading));
+  const section = soleSection(tailor.sections, isProjectsHeading);
   if (!section || section.bullets.length === 0) return [];
 
   // `deriveProjectsFromSections` works in bullet *text*; re-attach each
@@ -490,13 +565,19 @@ export function deriveProjectsForTemplate(
   // survived `stripUnsupportedBullets()` reach the page intact.
   const byText = new Map(section.bullets.map((b) => [b.text, b] as const));
 
-  return deriveProjectsFromSectionsPlain(tailor, baseProjects).map((project) => ({
+  const projects = deriveProjectsFromSectionsPlain(tailor, baseProjects).map((project) => ({
     name: project.name,
     technologies: project.technologies,
     bullets: project.bullets.map(
       (text) => byText.get(text) ?? { text, fact_ids: [] as string[] },
     ),
   }));
+
+  // One dropped bullet forfeits the whole derivation — see above.
+  const placed = projects.reduce((total, project) => total + project.bullets.length, 0);
+  if (placed !== section.bullets.length) return [];
+
+  return projects;
 }
 
 function deriveProjectsFromSectionsPlain(

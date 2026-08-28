@@ -25,6 +25,7 @@
  */
 
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
+import { isExperienceHeading, isProjectsHeading } from "./headings";
 import type { CitedBullet, Fact, TailorOutput } from "../pipeline/schemas";
 
 export interface ResumeProfile {
@@ -400,12 +401,13 @@ export function extraSections(tailor: TailorOutput) {
   const hasProjects = (tailor.projects ?? []).length > 0;
   return tailor.sections.filter((section) => {
     if (headingIs(section.heading, "education")) return false;
-    if (hasExperience && headingIs(section.heading, "experience", "work experience")) {
-      return false;
-    }
-    if (hasProjects && headingIs(section.heading, "projects", "selected projects")) {
-      return false;
-    }
+    // The predicates are shared with the derivation in `./base-entries.ts` on
+    // purpose: a section may only be suppressed here if that code consumed it,
+    // and may only be consumed there if this code suppresses it. When the two
+    // disagreed, "Relevant Projects" was consumed *and* kept and every bullet
+    // printed twice.
+    if (hasExperience && isExperienceHeading(section.heading)) return false;
+    if (hasProjects && isProjectsHeading(section.heading)) return false;
     return true;
   });
 }

@@ -11,7 +11,10 @@
  * parser.
  */
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { enrichTailorFromBase } from "@/src/pdf/base-entries";
 import { renderResumePdf } from "@/src/pdf/render";
 import {
   dedupeEducationLines,
@@ -226,5 +229,56 @@ describe("renderResumePdf — entry headers in the rendered bytes", () => {
     const pdf = await renderResumePdf({ profile: PROFILE, tailor: legacy, education: [] });
     const text = (await extractPdfText(pdf)).replace(/\s+/g, " ");
     expect(text).toContain("Built a job-tracking pipeline used daily.");
+  });
+});
+
+describe("legacy rows enriched from the base resume — no bullet is lost", () => {
+  const BASE = readFileSync(path.resolve(__dirname, "fixtures/resume-base.tex"), "utf-8");
+
+  async function renderedText(tailor: TailorOutput): Promise<string> {
+    const pdf = await renderResumePdf({ profile: PROFILE, tailor, education: [] });
+    return (await extractPdfText(pdf)).replace(/\s+/g, " ");
+  }
+
+  it("prints every loose Projects bullet even when more arrive than the base can hold", async () => {
+    // Regression: `deriveProjectsFromSections()` places leftovers only into
+    // still-empty base projects, so two of these six were assigned nowhere —
+    // and populating `projects` then made `extraSections()` drop the loose
+    // section that still held them. Six bullets went into the react-pdf
+    // renderer and four came out.
+    const bullets = [
+      "Alpha work item one.",
+      "Beta work item two.",
+      "Gamma work item three.",
+      "Delta work item four.",
+      "Epsilon work item five.",
+      "Zeta work item six.",
+    ].map((text, i) => ({ text, fact_ids: [`F-1${i}`] }));
+
+    const legacy: TailorOutput = {
+      summary: TAILOR.summary,
+      skills: TAILOR.skills,
+      sections: [{ heading: "Projects", bullets }],
+    };
+    const text = await renderedText(enrichTailorFromBase(legacy, BASE));
+
+    for (const bullet of bullets) expect(text).toContain(bullet.text);
+  });
+
+  it("prints a 'Relevant Projects' bullet exactly once", async () => {
+    // The derivation consumed `/project/i` while `extraSections()` only
+    // suppressed an exact "projects", so the bullet was printed under its
+    // project name *and* again as a loose section.
+    const bullet = { text: "Developed a Kanban board with role-based access.", fact_ids: ["F-020"] };
+    const legacy: TailorOutput = {
+      summary: TAILOR.summary,
+      skills: TAILOR.skills,
+      sections: [{ heading: "Relevant Projects", bullets: [bullet] }],
+    };
+    const enriched = enrichTailorFromBase(legacy, BASE);
+    const text = await renderedText(enriched);
+
+    expect(text.split(bullet.text).length - 1).toBe(1);
+    expect(text).toContain("TaskBoard");
   });
 });

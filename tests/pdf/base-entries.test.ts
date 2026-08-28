@@ -6,11 +6,13 @@ import {
   enrichExperience,
   enrichTailorFromBase,
   experienceRegion,
+  MIN_MATCH_SCORE,
   extractBaseExperience,
   scoreEntryMatch,
   splitDateRange,
   type BaseExperienceEntry,
 } from "@/src/pdf/base-entries";
+import { extraSections } from "@/src/pdf/ResumeDocument";
 import type { TailorOutput } from "@/src/pipeline/schemas";
 
 const BASE = readFileSync(path.resolve(__dirname, "fixtures/resume-base.tex"), "utf-8");
@@ -57,6 +59,22 @@ describe("extractBaseExperience", () => {
   it("returns nothing for a base with no Experience section", () => {
     expect(extractBaseExperience("\\documentclass{article}")).toEqual([]);
     expect(experienceRegion("\\documentclass{article}")).toBeNull();
+  });
+
+  it("reads a base whose section is headed Work/Professional Experience", () => {
+    // QA regression: only a literal `\section{Experience}` was recognised, so a
+    // resume headed `\section{Work Experience}` produced no base entries and
+    // the whole enrichment no-opped silently — no dates on the PDF, no
+    // diagnostic anywhere.
+    for (const heading of ["Work Experience", "Professional Experience", "Employment Experience"]) {
+      const renamed = BASE.replace("\\section{Experience}", `\\section{${heading}}`);
+      expect(renamed).not.toBe(BASE);
+      expect(extractBaseExperience(renamed).map((e) => e.organization)).toEqual([
+        "Northwind Labs",
+        "City Utilities Board",
+        "Contoso Retail",
+      ]);
+    }
   });
 });
 
@@ -158,6 +176,73 @@ describe("enrichExperience", () => {
     );
     const starts = enriched.map((e) => e.start).filter(Boolean);
     expect(new Set(starts).size).toBe(starts.length);
+  });
+
+  it("does not date a different employer that merely shares a city word", () => {
+    // QA blocker, reproduced against the owner's real base resume: it holds a
+    // `City of Calgary` row, and `Calgary Co-op` / `University of Calgary`
+    // scored on the single token `calgary`. The PDF then printed a different
+    // company with the City of Calgary's dates and office — every string on
+    // the page real, the employment history false, and nothing downstream
+    // catches it.
+    const city: BaseExperienceEntry[] = [
+      {
+        organization: "City of Springfield",
+        role: "Software Engineer (Capstone Project)",
+        location: "Springfield, ST",
+        start: "September 2025",
+        end: "Present",
+      },
+    ];
+    for (const organization of ["Springfield Co-op", "University of Springfield"]) {
+      expect(scoreEntryMatch({ organization }, city[0])).toBeLessThan(MIN_MATCH_SCORE);
+      const [entry] = enrichExperience(
+        [{ organization, role: "", location: "", start: "", end: "", bullets }],
+        city,
+      );
+      expect(entry).toMatchObject({ role: "", location: "", start: "", end: "" });
+    }
+  });
+
+  it("requires containment to land on whole words", () => {
+    // `"canada post".includes("ada")` is true and means nothing.
+    const canada: BaseExperienceEntry = {
+      organization: "Canada Post",
+      role: "Developer",
+      location: "Ottawa, ON",
+      start: "May 2024",
+      end: "August 2024",
+    };
+    expect(scoreEntryMatch({ organization: "Ada" }, canada)).toBeLessThan(MIN_MATCH_SCORE);
+    const [entry] = enrichExperience(
+      [{ organization: "Ada", role: "", location: "", start: "", end: "", bullets }],
+      [canada],
+    );
+    expect(entry.start).toBe("");
+  });
+
+  it("still pairs the matches that carry real organization evidence", () => {
+    const google: BaseExperienceEntry = {
+      organization: "Google Innovate Program, Customer Maps",
+      role: "AI/ML Intern",
+      location: "Calgary, AB",
+      start: "March 2025",
+      end: "June 2025",
+    };
+    expect(
+      scoreEntryMatch({ organization: "Google" }, google),
+    ).toBeGreaterThanOrEqual(MIN_MATCH_SCORE);
+    expect(
+      scoreEntryMatch({ organization: "Northwind Labs" }, base[0]),
+    ).toBeGreaterThanOrEqual(MIN_MATCH_SCORE);
+    expect(
+      scoreEntryMatch({ organization: "Contoso Retail Inc." }, base[1]),
+    ).toBeGreaterThanOrEqual(MIN_MATCH_SCORE);
+    const [entry] = enrichExperience(
+      [{ organization: "Google", role: "", location: "", start: "", end: "", bullets }],
+      [google],
+    );
+    expect(entry.start).toBe("March 2025");
   });
 
   it("matches when the base swapped employer and title", () => {
@@ -330,6 +415,60 @@ describe("enrichTailorFromBase", () => {
     // Citations survive the round trip, so nothing the hallucination gate let
     // through is silently laundered into an uncited bullet.
     expect(out.projects?.[0].bullets[0].fact_ids).toEqual(["F-020"]);
+  });
+
+  it("keeps the loose Projects section when a bullet would be dropped", () => {
+    // `deriveProjectsFromSections()` deals leftover bullets only to base
+    // projects that are still empty, so more loose bullets than the base has
+    // projects means some are placed nowhere. Populating `tailor.projects`
+    // anyway made `extraSections()` drop the loose section that still held the
+    // strays — six bullets in, four on the page. All or nothing instead.
+    const bullets = [
+      "Alpha work item one.",
+      "Beta work item two.",
+      "Gamma work item three.",
+      "Delta work item four.",
+      "Epsilon work item five.",
+      "Zeta work item six.",
+    ].map((text, i) => ({ text, fact_ids: [`F-1${i}`] }));
+    const input = tailor({ sections: [{ heading: "Projects", bullets }] });
+
+    const out = enrichTailorFromBase(input, BASE);
+    expect(out.projects).toBeUndefined();
+    expect(out.sections).toEqual(input.sections);
+  });
+
+  it("consumes a 'Relevant Projects' heading rather than printing it twice", () => {
+    // The derivation matched `/project/i` while `extraSections()` compared for
+    // equality against "projects", so a section headed "Relevant Projects" was
+    // consumed *and* kept — the same bullet printed under a project name and
+    // again as a loose section.
+    const bullet = { text: "Developed a Kanban board with role-based access.", fact_ids: ["F-020"] };
+    const out = enrichTailorFromBase(
+      tailor({ sections: [{ heading: "Relevant Projects", bullets: [bullet] }] }),
+      BASE,
+    );
+
+    expect(out.projects?.flatMap((p) => p.bullets.map((b) => b.text))).toEqual([bullet.text]);
+    expect(extraSections(out)).toEqual([]);
+  });
+
+  it("refuses to derive when two sections both claim the projects heading", () => {
+    // `extraSections()` would suppress both once `projects` is populated,
+    // while the derivation only ever reads one — the other's bullets would
+    // simply disappear.
+    const input = tailor({
+      sections: [
+        { heading: "Projects", bullets: [{ text: "Built a Kanban board.", fact_ids: ["F-020"] }] },
+        {
+          heading: "Selected Projects",
+          bullets: [{ text: "Built a recommendation engine.", fact_ids: ["F-021"] }],
+        },
+      ],
+    });
+    const out = enrichTailorFromBase(input, BASE);
+    expect(out.projects).toBeUndefined();
+    expect(extraSections(out).map((s) => s.heading)).toEqual(["Projects", "Selected Projects"]);
   });
 
   it("leaves the loose sections in place when nothing can be derived", () => {
