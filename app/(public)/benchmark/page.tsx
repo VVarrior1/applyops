@@ -214,8 +214,9 @@ function Methodology({ board }: { board: BenchmarkBoard }) {
             <strong className="font-medium text-foreground">The judge is an LLM.</strong> These
             scores measure agreement with{" "}
             <span className="font-mono text-[13px]">{board.judgeModelId}</span>&apos;s reading of
-            a written rubric, not ground truth. Judge-vs-human weighted kappa is reported on the
-            owner&apos;s eval page once enough items carry human grades.
+            a written rubric, not ground truth. There is no human grading of these items by
+            design; the objective number is the hallucination rate (uncited claims), which needs no
+            judge.
           </li>
           {judgeIsContestant && (
             <li>

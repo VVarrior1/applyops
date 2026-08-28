@@ -48,10 +48,14 @@ without merging:
 
 ![The eval gate failing a real regression pull request](docs/img/gate-red.png)
 
-Kappa (judge-vs-human agreement) reads `null`/"pending" everywhere on this
-page — no golden item has a human grade yet (owner's manual task, see below).
-Every score above is agreement with an LLM judge, not with a human, and the
-site says so wherever it shows a number.
+Two kinds of number appear above, and the site labels them wherever they show
+up. The **hallucination rate** is objective: a generated claim either cites a
+confirmed fact id or it doesn't, no model opinion involved. The **rubric
+scores** are an LLM judge's reading of a written rubric — useful for catching
+regressions between prompt versions, not ground truth. There is no human
+grading in this project by design (a grading UI exists at `/evals/grade` but
+nothing depends on it); the planned calibration is judge-vs-judge agreement
+across two different model families.
 
 ## 2. Funnel, with confidence intervals
 
@@ -283,12 +287,12 @@ requires an interactive TTY and a deliberate override.
 - No Google OAuth yet — Supabase email magic link only (a later add, not in
   this scope).
 
-Five things remain manual, on purpose — see
-[`docs/USER_TODO.md`](docs/USER_TODO.md): grading the golden set for a real
-kappa number, adding an `OPENAI_API_KEY` (and re-adding `ANTHROPIC_API_KEY`
-once it has credit), confirming magic-link email delivery, inviting the
-first users, and pointing Supabase Auth's redirect URL at the deployed
-Vercel URL. Everything else — scraping, ranking, tailoring, fact-checking,
+Four things remain manual, on purpose — see
+[`docs/USER_TODO.md`](docs/USER_TODO.md): adding an `OPENAI_API_KEY` (and
+re-adding `ANTHROPIC_API_KEY` once it has credit), confirming magic-link
+email delivery, inviting the first users, and pointing Supabase Auth's
+redirect URL at the deployed Vercel URL. Human grading of the golden set is
+deliberately not one of them. Everything else — scraping, ranking, tailoring, fact-checking,
 the eval gate, the benchmark, deployment — runs unattended.
 
 ## 9. Running it yourself

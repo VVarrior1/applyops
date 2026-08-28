@@ -77,7 +77,7 @@ export function renderReportHtml(
     ],
     [
       "Judge vs human κ",
-      summary.kappa == null ? "pending grades" : fmt(summary.kappa),
+      summary.kappa == null ? "n/a — AI-judged" : fmt(summary.kappa),
       `${summary.gradedItems} graded items`,
     ],
     ["Cost", usd(summary.costUsd), `${usd(summary.costUsd / Math.max(1, summary.n))} / item`],
@@ -242,7 +242,7 @@ export function renderConsoleSummary(summary: EvalRunSummary): string {
       (summary.failedItems ? `, ${summary.failedItems} failed` : ""),
     `  mean score       ${fmt(summary.meanScore)} / 5`,
     `  hallucination    ${(summary.hallucinationRate * 100).toFixed(2)}%`,
-    `  kappa (vs human) ${summary.kappa == null ? `pending grades (${summary.gradedItems} graded)` : fmt(summary.kappa)}`,
+    `  kappa (vs human) ${summary.kappa == null ? "n/a — AI-judged (no human grading planned)" : fmt(summary.kappa)}`,
     `  cost             ${usd(summary.costUsd)} (${usd(summary.costUsd / Math.max(1, summary.n))}/item)`,
     `  latency          p50 ${Math.round(summary.p50Ms)} ms · p95 ${Math.round(summary.p95Ms)} ms`,
   ];

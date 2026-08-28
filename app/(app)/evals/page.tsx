@@ -146,7 +146,7 @@ export default async function EvalsPage() {
             <div className="text-xs text-muted-foreground">golden set ({STEP})</div>
           </div>
           <Link href="/evals/grade" className={buttonVariants({ size: "sm" })}>
-            Grade items
+            Grade items (optional)
           </Link>
         </div>
       </header>
@@ -230,7 +230,7 @@ export default async function EvalsPage() {
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {run.kappa == null ? (
-                          <span className="text-xs text-muted-foreground">pending grades</span>
+                          <span className="text-xs text-muted-foreground">n/a — AI-judged</span>
                         ) : (
                           fmt(run.kappa)
                         )}

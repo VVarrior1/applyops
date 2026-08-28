@@ -2,23 +2,19 @@
 
 Everything else — scraping, ranking, tailoring, fact-checking, the eval gate,
 the benchmark, deployment — is automated (CI, the nightly scrape cron,
-`vercel --prod`). These five things need a human, specifically the owner,
+`vercel --prod`). These four things need a human, specifically the owner,
 because they touch a UI a script can't click through, a mailbox only a human
 can check, or a credential no CLI is authorized to generate on its own.
 
-## 1. Grade the 40 golden items (~2–3 hours)
+## 1. (Not planned) Human grading of the golden set
 
-Kappa (judge-vs-human agreement) reads `null` / "pending" everywhere on
-`/results` and `/benchmark` until this is done — every score currently
-published is agreement with an LLM judge, not with a human.
-
-1. Sign in as the owner, go to **`/evals/grade`**.
-2. Score each of the 40 frozen golden items on the same four axes the judge
-   uses (grounding, coverage, specificity, keyword-stuffing penalty).
-3. Once at least `MIN_GRADED_ITEMS_FOR_KAPPA` (5, see
-   [`src/eval/runner.ts`](../src/eval/runner.ts)) items are graded, `/evals`
-   starts reporting a real weighted-kappa number instead of "pending human
-   grades", and so will `/results`' public scorecard on the next run.
+The owner has decided not to hand-grade the 40 golden items. Consequences,
+already reflected in the app and README: the judge-vs-human kappa is not
+reported anywhere (it shows "n/a — AI-judged"), the objective quality number
+is the hallucination (uncited-claim) rate, and rubric scores are labelled as
+LLM-judge scores. `/evals/grade` still works if anyone ever wants to grade a
+few items, but nothing depends on it. Planned replacement: judge-vs-judge
+agreement across two model families once a second provider key exists.
 
 ## 2. Add `OPENAI_API_KEY` (and re-add `ANTHROPIC_API_KEY` once it has credit)
 

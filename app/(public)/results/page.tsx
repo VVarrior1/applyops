@@ -61,10 +61,10 @@ function EvalScorecardCard({ card }: { card: EvalScorecard | null }) {
               <dd className="font-medium tabular-nums">{pct(card.hallucinationRate)}</dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">Judge–human κ</dt>
+              <dt className="text-xs text-muted-foreground">Judge calibration</dt>
               <dd className="font-medium tabular-nums">
                 {card.kappa == null ? (
-                  <span className="text-muted-foreground">pending</span>
+                  <span className="text-muted-foreground">AI-judged only (no human grading)</span>
                 ) : (
                   card.kappa.toFixed(2)
                 )}

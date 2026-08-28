@@ -199,7 +199,7 @@ describe("reports", () => {
     const html = renderReportHtml(summary({ results: rows }), rows);
     expect(html).toContain("Backend Engineer");
     expect(html).toContain("4.25");
-    expect(html).toContain("pending grades");
+    expect(html).toContain("n/a — AI-judged");
     expect(html).toContain("google:gemini-3.7-flash");
   });
 
