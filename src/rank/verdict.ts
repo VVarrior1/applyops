@@ -12,7 +12,7 @@
  *
  * Reasons are short, user-facing, hard blockers first, never duplicated.
  */
-import { COUNTRY_OPTIONS, countriesAllow, type CountryCode } from "../finders/country";
+import { COUNTRY_OPTIONS, countriesAllow, hasUnrecognizedGeography, type CountryCode } from "../finders/country";
 
 export type Verdict = "apply" | "maybe" | "skip";
 
@@ -73,6 +73,8 @@ export function assessJob(input: VerdictInput): VerdictResult {
   if (!countriesAllow(job.countries, wantedCountries)) {
     const names = (job.countries ?? []).map(countryName).join(", ");
     push(hard, `Restricted to ${names} — outside your countries`);
+  } else if (wantedCountries && wantedCountries.length > 0 && hasUnrecognizedGeography(job.location, job.countries)) {
+    push(hard, `Location "${job.location}" isn't in one of your countries`);
   }
 
   const userLacksUsAuth = prefs?.workAuth === "canada" || prefs?.workAuth === "needs_sponsorship" || prefs?.workAuth === null || prefs?.workAuth === undefined;

@@ -11,6 +11,8 @@
  * so genuinely global remote roles are not hidden.
  */
 
+import { WORLD_COUNTRIES, WORLD_CITIES, REMOTEISH_RE } from "./country-data";
+
 export type CountryCode = string; // ISO-3166 alpha-2
 
 export const COUNTRY_OPTIONS: ReadonlyArray<{ code: CountryCode; name: string }> = [
@@ -81,6 +83,7 @@ export const COUNTRY_OPTIONS: ReadonlyArray<{ code: CountryCode; name: string }>
 
 // Lower-cased alias → code. Multi-word aliases are matched as whole phrases.
 const NAME_ALIASES: Record<string, CountryCode> = {
+  ...WORLD_COUNTRIES,
   canada: "CA",
   "united states": "US",
   "united states of america": "US",
@@ -196,6 +199,15 @@ export function detectCountries(location: string | null | undefined, description
     // 4. Well-known cities.
     for (const city of US_CITIES) { const i = lower.indexOf(city); if (i >= 0) hits.push({ at: i, code: "US" }); }
     for (const city of CA_CITIES) { const i = lower.indexOf(city); if (i >= 0) hits.push({ at: i, code: "CA" }); }
+    // 5. World cities (unambiguous names only). "London" is the one real
+    //    ambiguity: London, Ontario exists — it is GB unless ON/Ontario appears.
+    for (const [city, code] of Object.entries(WORLD_CITIES)) {
+      const re = new RegExp(`(^|[^a-zà-ÿ])${city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=$|[^a-zà-ÿ])`, "i");
+      const m2 = re.exec(lower);
+      if (m2) hits.push({ at: m2.index + m2[1].length, code });
+    }
+    const londonAt = lower.search(/(^|[^a-z])london(?=$|[^a-z])/);
+    if (londonAt >= 0) hits.push({ at: londonAt, code: /\b(on|ont|ontario|canada)\b/.test(lower) ? "CA" : "GB" });
 
     hits.sort((a, b) => a.at - b.at);
     const out: CountryCode[] = [];
@@ -208,6 +220,23 @@ export function detectCountries(location: string | null | undefined, description
   // Only trust the description for explicit "located in <country>" style restrictions.
   const restrict = description.match(/(?:located|based|reside|residing|eligible to work|authorized to work|candidates)\s+(?:in|within)\s+(?:the\s+)?([A-Za-z .]{2,40})/i);
   return restrict ? scan(restrict[1]) : [];
+}
+
+/** True when the location carries no fixed geography ("Remote", "Anywhere", null). */
+export function isRemoteishLocation(location: string | null | undefined): boolean {
+  const text = (location ?? "").trim();
+  if (!text) return true;
+  return REMOTEISH_RE.test(text);
+}
+
+/**
+ * True when a posting names a concrete place we could not map to a country.
+ * Such postings are NOT "anywhere" — they are almost always abroad — so
+ * country-filtered views must exclude them.
+ */
+export function hasUnrecognizedGeography(location: string | null | undefined, countries: CountryCode[] | null | undefined): boolean {
+  if (countries && countries.length > 0) return false;
+  return !isRemoteishLocation(location);
 }
 
 /** Order-preserving overlap test: does the job allow any of the user's countries? Unknown ([]) → allowed. */

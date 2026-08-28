@@ -86,4 +86,12 @@ describe("assessJob", () => {
     expect(new Set(v.reasons).size).toBe(v.reasons.length);
     expect(v.reasons[0]).toMatch(/Argentina|US work authorization/);
   });
+
+  it("skips a concrete place it cannot map to a country, but not a bare Remote", () => {
+    const v = assessJob({ ...base, job: { ...base.job, countries: [], location: "Ouagadougou Office", remote: false } });
+    expect(v.verdict).toBe("skip");
+    expect(v.reasons[0]).toMatch(/Ouagadougou/);
+    const r = assessJob({ ...base, job: { ...base.job, countries: [], location: "Remote", remote: true } });
+    expect(r.verdict).toBe("apply");
+  });
 });

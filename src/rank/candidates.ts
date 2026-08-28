@@ -34,11 +34,21 @@ export type CandidatePrefs = Pick<SearchPrefsRow, "countries" | "workAuth"> | nu
  * value via `sql.param` — not spliced into the query text — so it is never
  * inlined SQL and works for any array length.
  */
-export function countryOverlapCondition(wanted: CountryCode[]): SQL {
-  return sql`(${jobs.countries} is null or cardinality(${jobs.countries}) = 0 or ${jobs.countries} && ${sql.param(wanted)}::text[])`;
+export function countryOverlapCondition(wanted: CountryCode[], opts: { strict?: boolean } = {}): SQL {
+  const overlap = sql`${jobs.countries} && ${sql.param(wanted)}::text[]`;
+  if (opts.strict) return sql`(${overlap})`;
+  // Non-strict: a posting with NO detectable country passes only when its
+  // location is remote-ish ("Remote", "Anywhere", null). A concrete city we
+  // could not map (e.g. a town in Albania) is treated as abroad, not as
+  // "anywhere" — see hasUnrecognizedGeography() in src/finders/country.ts.
+  return sql`(${overlap} or ((${jobs.countries} is null or cardinality(${jobs.countries}) = 0) and ${remoteishLocationCondition()}))`;
 }
 
-/** `jobs.countries` is unset or empty — "unknown / anywhere" postings only. */
+/** SQL twin of isRemoteishLocation(): null location or a remote-ish token (Postgres uses \y for word boundaries). */
+export function remoteishLocationCondition(): SQL {
+  return sql`(${jobs.location} is null or ${jobs.location} ~* '\\y(remote|anywhere|worldwide|world-wide|global|distributed|work from home|wfh|virtual|telecommute)\\y')`;
+}
+
 export function countryUnknownCondition(): SQL {
   return sql`(${jobs.countries} is null or cardinality(${jobs.countries}) = 0)`;
 }

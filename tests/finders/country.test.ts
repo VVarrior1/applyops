@@ -51,3 +51,31 @@ describe("detectCountries", () => {
     expect(new Set(codes).size).toBe(codes.length);
   });
 });
+
+describe("world coverage and unrecognized geography", () => {
+  it.each([
+    ["Tiranë, Tirana County, Albania", ["AL"]],
+    ["Limassol, Limassol, Cyprus", ["CY"]],
+    ["Kaunas Office", ["LT"]],
+    ["London", ["GB"]],
+    ["London, ON", ["CA"]],
+    ["London, Ontario, Canada", ["CA"]],
+    ["Paris, France", ["FR"]],
+    ["Bogotá", ["CO"]],
+    ["Ho Chi Minh City", ["VN"]],
+  ])("%s → %j", async (location, expected) => {
+    const { detectCountries } = await import("../../src/finders/country");
+    expect(detectCountries(location)).toEqual(expected);
+  });
+
+  it("flags concrete-but-unmapped places, not remote-ish ones", async () => {
+    const { hasUnrecognizedGeography, isRemoteishLocation } = await import("../../src/finders/country");
+    expect(isRemoteishLocation("Remote")).toBe(true);
+    expect(isRemoteishLocation("Anywhere in the world")).toBe(true);
+    expect(isRemoteishLocation(null)).toBe(true);
+    expect(isRemoteishLocation("Ouagadougou Office")).toBe(false);
+    expect(hasUnrecognizedGeography("Ouagadougou Office", [])).toBe(true);
+    expect(hasUnrecognizedGeography("Remote", [])).toBe(false);
+    expect(hasUnrecognizedGeography("Tiranë, Albania", ["AL"])).toBe(false);
+  });
+});

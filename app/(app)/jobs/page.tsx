@@ -222,7 +222,8 @@ export default async function JobsPage({
   } else if (filters.country !== "any") {
     // A single code drawn from the user's own countries (parseCountry
     // rejects anything else back to "my").
-    conditions.push(countryOverlapCondition([filters.country]));
+    // An explicit single country is STRICT: no "unknown/anywhere" postings.
+    conditions.push(countryOverlapCondition([filters.country], { strict: true }));
   }
   if (filters.posted !== "any") {
     conditions.push(postedWindowCondition(filters.posted));
