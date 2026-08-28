@@ -45,7 +45,9 @@ export async function fetchGreenhouseJobs(slug: string): Promise<RawJob[]> {
       location,
       remote: /\bremote\b/i.test(location ?? ""),
       description: stripHtml(job.content) || title,
-      postedAt: toDate(job.updated_at ?? job.first_published ?? job.created_at),
+      // first_published is the real posting date; updated_at moves on every edit/refresh
+      // (Jane Street's whole board read as "posted today" — 2026-08-27).
+      postedAt: toDate(job.first_published ?? job.created_at ?? job.updated_at),
     });
   }
   return jobs;
