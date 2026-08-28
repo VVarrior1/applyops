@@ -81,7 +81,12 @@ export const GHOSTSCRIPT_TIMEOUT_MS = 30_000;
 export const SUBPROCESS_MAX_BUFFER = 10 * 1024 * 1024;
 
 /**
- * Directories prepended to `PATH` for the `pdflatex`/`gs` lookups.
+ * Directories **appended** to `PATH` for the `pdflatex`/`gs` lookups.
+ *
+ * Appended rather than prepended on purpose (`latexEnv` does `parts.push`):
+ * whatever the host already has on `PATH` — an operator's chosen TeX Live, a
+ * `PDFLATEX_BIN` override, a Nix or Homebrew shim — keeps winning, and these
+ * entries only fill in for a process that inherited a bare `PATH`.
  *
  * MacTeX installs `pdflatex` into `/Library/TeX/texbin`, which is added to an
  * interactive shell's `PATH` by a `/etc/paths.d` entry — a Next.js server or a
@@ -324,7 +329,33 @@ export const DEFAULT_FAMILIAR_SKILLS = [
   "UX/UI Principles",
 ];
 
-const FAMILIAR_LINE_REGEX = /\\textbf\{Familiar\}\{:\s*([^}]*)\}/;
+/**
+ * Reads the contents of the base's `\textbf{Familiar}{: …}` line.
+ *
+ * Brace-*balanced* (via {@link readBalancedGroup}) rather than the `[^}]*`
+ * regex this started as: a Familiar list is user LaTeX and may perfectly well
+ * contain a braced macro — `\textbf{AWS}`, `\href{…}{…}` — and `[^}]*` stops
+ * dead at that macro's first `}`. The truncated remainder was then written
+ * back over the real line by {@link replaceSkillsSection}, silently deleting
+ * the rest of the user's Familiar skills from their own resume.
+ *
+ * Returns `null` when there is no such line, or when the group does not open
+ * with the `:` v1's format requires — the caller then falls back to
+ * {@link DEFAULT_FAMILIAR_SKILLS}.
+ */
+function readFamiliarLine(block: string): string | null {
+  const marker = "\\textbf{Familiar}";
+  const at = block.indexOf(marker);
+  if (at === -1) return null;
+  let i = at + marker.length;
+  while (i < block.length && /\s/.test(block[i])) i++;
+  const group = readBalancedGroup(block, i);
+  if (!group) return null;
+  const value = group.value.trimStart();
+  if (!value.startsWith(":")) return null;
+  const list = value.slice(1).trim();
+  return list.length > 0 ? list : null;
+}
 
 /** Splits a rendered `Familiar` line back into individual skill names. */
 function parseFamiliar(raw: string): string[] {
@@ -357,11 +388,18 @@ export function replaceSkillsSection(
   const match = content.match(SKILLS_REGEX);
   if (!match) return content;
 
-  const existingFamiliar = match[2].match(FAMILIAR_LINE_REGEX)?.[1];
+  const existingFamiliar = readFamiliarLine(match[2]);
   const familiarList = existingFamiliar
     ? parseFamiliar(existingFamiliar)
     : DEFAULT_FAMILIAR_SKILLS;
-  const familiarLower = new Set(familiarList.map((s) => s.toLowerCase()));
+  // Both the raw entry and its plain-text reading, so a base that writes
+  // `\textbf{AWS}` in its Familiar line still filters a tailored "AWS" out of
+  // the Proficient line instead of claiming it twice.
+  const familiarLower = new Set(
+    familiarList
+      .flatMap((s) => [s.toLowerCase(), latexToPlain(s).toLowerCase()])
+      .filter(Boolean),
+  );
 
   const proficient = [
     ...new Set(skills.map((s) => s.trim()).filter(Boolean)),
@@ -408,6 +446,14 @@ export function replaceSkillsSection(
  */
 export const PROJECTS_START_REGEX =
   /%-----------PROJECTS-----------[\s\S]*?\\section{Projects}\s*\\resumeSubHeadingListStart/;
+/**
+ * v1's `projectsEndRegex`. **No longer the splice boundary** — see
+ * {@link findProjectsBlock} for why anchoring the end of the Projects block
+ * to the document's *last* `\resumeSubHeadingListEnd` deleted every section
+ * that came after Projects. Kept exported because it still names the shape
+ * v1's own resume has (Projects last, then `\end{document}`), which the
+ * fixture tests use to slice off a document's close.
+ */
 export const PROJECTS_END_REGEX = /\\resumeSubHeadingListEnd\s*\\end{document}/;
 
 /** v1's closing line, used only when the base has no note of its own. */
@@ -514,24 +560,82 @@ export function extractBaseProjects(content: string): BaseProject[] {
   return projects;
 }
 
-/** Locates the Projects block: `{before, body, after}` around it. */
+/** The macro that closes the `\resumeSubHeadingListStart` a section opens. */
+const PROJECTS_LIST_END = "\\resumeSubHeadingListEnd";
+
+/** Why a base resume's Projects block cannot be spliced. */
+export type ProjectsBlockProblem =
+  /** No `%---PROJECTS---` … `\section{Projects}\resumeSubHeadingListStart`. */
+  | "no-projects-block"
+  /** The Projects list is never closed with `\resumeSubHeadingListEnd`. */
+  | "no-list-end"
+  /** Another `\section{…}` begins before the Projects list closes. */
+  | "section-inside";
+
+/** Operator-facing wording for each {@link ProjectsBlockProblem}. */
+export const PROJECTS_BLOCK_PROBLEM_MESSAGES: Record<ProjectsBlockProblem, string> = {
+  "no-projects-block":
+    "no '%-----------PROJECTS-----------' … '\\section{Projects}\\resumeSubHeadingListStart' block matched — tailored projects will NOT be spliced in",
+  "no-list-end":
+    "the Projects block is never closed with '\\resumeSubHeadingListEnd' — tailored projects will NOT be spliced in",
+  "section-inside":
+    "a '\\section{...}' starts before the Projects block's '\\resumeSubHeadingListEnd' — ApplyOps will not splice projects rather than risk deleting that section",
+};
+
+/**
+ * Locates the Projects block, or says why it will not be touched.
+ *
+ * The end of the block is the **first** `\resumeSubHeadingListEnd` at or after
+ * the opening `\resumeSubHeadingListStart`. It used to be
+ * {@link PROJECTS_END_REGEX} matched over the whole document, i.e. the *last*
+ * `\resumeSubHeadingListEnd` before `\end{document}` — which is the same
+ * position only when Projects happens to be the final section, as it is in
+ * the owner's own resume. For any other ordering that regex swallowed
+ * everything after Projects: a base laid out Education → Projects →
+ * Experience came out of `spliceTailoredResume` with the entire Experience
+ * section deleted, and the mangled `.tex` still compiled, so nothing
+ * downstream ever noticed and the user downloaded a resume with no work
+ * history.
+ *
+ * A `\section{` between the two markers means the forward search has run past
+ * the end of Projects into another section (typically an unclosed list).
+ * Splicing there would delete that section, so this refuses instead — the
+ * same "leave it alone rather than corrupt it" stance the rest of the module
+ * takes. The base's own Projects block is then rendered as written.
+ */
+function findProjectsBlock(
+  content: string,
+):
+  | { ok: true; start: number; end: number; body: string }
+  | { ok: false; problem: ProjectsBlockProblem } {
+  const startMatch = content.match(PROJECTS_START_REGEX);
+  if (!startMatch || startMatch.index === undefined) {
+    return { ok: false, problem: "no-projects-block" };
+  }
+  const start = startMatch.index + startMatch[0].length;
+  const end = content.indexOf(PROJECTS_LIST_END, start);
+  if (end === -1) return { ok: false, problem: "no-list-end" };
+  const body = content.slice(start, end);
+  if (body.includes("\\section{")) return { ok: false, problem: "section-inside" };
+  return { ok: true, start, end, body };
+}
+
+/**
+ * Import-time check behind `applyops resume import-latex`'s warnings: returns
+ * the operator-facing reason tailored projects will not be spliced into this
+ * base, or `null` when the block is fine.
+ */
+export function projectsBlockWarning(content: string): string | null {
+  const block = findProjectsBlock(content);
+  return block.ok ? null : PROJECTS_BLOCK_PROBLEM_MESSAGES[block.problem];
+}
+
+/** Locates the Projects block: `{start, end, body}`, or `null` to leave it be. */
 function projectsRegion(
   content: string,
 ): { start: number; end: number; body: string } | null {
-  const startMatch = content.match(PROJECTS_START_REGEX);
-  const endMatch = content.match(PROJECTS_END_REGEX);
-  if (
-    !startMatch ||
-    !endMatch ||
-    startMatch.index === undefined ||
-    endMatch.index === undefined
-  ) {
-    return null;
-  }
-  const start = startMatch.index + startMatch[0].length;
-  const end = endMatch.index;
-  if (end < start) return null;
-  return { start, end, body: content.slice(start, end) };
+  const block = findProjectsBlock(content);
+  return block.ok ? { start: block.start, end: block.end, body: block.body } : null;
 }
 
 /**
@@ -546,7 +650,8 @@ function extractProjectsNote(body: string): string | null {
 /**
  * Writes a new Projects block, v1's `replaceProjectsSection`.
  *
- * Splits on the same two regexes v1 used and rebuilds
+ * Splits on v1's opening marker and the Projects list's own closing
+ * `\resumeSubHeadingListEnd` (see {@link findProjectsBlock}) and rebuilds
  * `before + projects + after`, so — exactly as in v1 — the `\section{Projects}`
  * line, the `\resumeSubHeadingListStart`, the closing
  * `\resumeSubHeadingListEnd` and `\end{document}` are all untouched original

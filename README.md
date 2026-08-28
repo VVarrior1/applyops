@@ -284,6 +284,10 @@ requires an interactive TTY and a deliberate override.
 - No fine-tuned models — every step runs an off-the-shelf model chosen by
   the benchmark in [§3](#3-model-benchmark).
 - No browser extension.
+- **No LaTeX rendering on the hosted deployment.** Vercel has no TeX
+  distribution, so every download from the live site is the built-in
+  react-pdf template; the LaTeX pipeline that splices into the owner's own
+  `resume.tex` runs locally only — see [§10](#10-resume-pdfs-your-latex-resume-or-the-built-in-template).
 - No Google OAuth yet — Supabase email magic link only (a later add, not in
   this scope).
 
@@ -352,3 +356,53 @@ npx tsx scripts/readme-stats.ts     # prints the eval/funnel/benchmark/coverage 
 npm run build && npm run start &    # in one terminal
 npx tsx scripts/screenshots.ts      # in another — writes docs/img/*.png
 ```
+
+## 10. Resume PDFs: your LaTeX resume, or the built-in template
+
+There are two renderers behind **Download PDF**, and which one runs is decided
+by the host, not by the user.
+
+| Renderer | What it produces | Runs when |
+|---|---|---|
+| `latex` ([`src/pdf/latex.ts`](src/pdf/latex.ts)) | **Your own `.tex` resume** with exactly two blocks replaced — Technical Skills and Projects — then `pdflatex` twice, optionally Ghostscript-merged with your transcript. Every other section comes out byte-identical. | You have imported a base resume **and** `pdflatex` is on the host. |
+| `react-pdf` ([`src/pdf/ResumeDocument.tsx`](src/pdf/ResumeDocument.tsx)) | A page drawn from the tailored output alone. Works anywhere, but cannot reproduce a document you hand-tuned. | Otherwise — including every download from the deployed site. |
+
+The response header `x-applyops-renderer` says which one ran (`latex` or
+`react-pdf`), the Tailor tab prints it under the Download button after each
+download, and `npm run cli -- pdf` prints it as a `renderer` line.
+
+**Register your base resume** (once; rows are append-only, so re-run it to
+update):
+
+```bash
+npm run cli -- resume import-latex ~/path/to/resume.tex --transcript ~/path/to/Transcript.pdf
+# other user (owner by default):  --user someone@example.com
+```
+
+It refuses a `.tex` that is a file-read primitive rather than a resume
+(`\write18`, `\input{/abs/path}`, …), and **warns** when a block it splices
+cannot be located — no Technical Skills block, no Projects block, an unclosed
+Projects list, or another `\section{...}` starting before the Projects block
+closes. A warned block is left exactly as you wrote it rather than spliced;
+ApplyOps never edits around a boundary it is unsure of.
+
+Then render locally:
+
+```bash
+npm run cli -- pdf <jobId>                 # writes out/<slug>.pdf and out/<slug>.tex
+npm run cli -- pdf <jobId> --transcript    # …with the transcript appended (Ghostscript)
+```
+
+**Host requirement, and the decision made about it.** `latex` needs a TeX
+distribution on the machine running the render (macOS: MacTeX or BasicTeX;
+Debian: `texlive-latex-recommended`), plus `gs` for the transcript merge.
+Vercel's runtime has neither, so `isLatexAvailable()` is `false` in
+production and the hosted site always falls back to react-pdf. **That is
+accepted, not an oversight:** putting TeX in production would mean moving the
+render to a container image (the repo's [`Dockerfile`](Dockerfile) already
+builds one for the apply agent) and paying for a host to run it, for a
+one-person job search where the owner does the final download from a laptop
+that has MacTeX anyway. The trade is revisited if anyone but the owner starts
+applying through the hosted app; until then the UI says which renderer
+produced the file so the difference is never silent. See
+[`docs/USER_TODO.md`](docs/USER_TODO.md) §6.

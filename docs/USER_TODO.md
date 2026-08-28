@@ -2,9 +2,11 @@
 
 Everything else — scraping, ranking, tailoring, fact-checking, the eval gate,
 the benchmark, deployment — is automated (CI, the nightly scrape cron,
-`vercel --prod`). These four things need a human, specifically the owner,
+`vercel --prod`). The items below need a human, specifically the owner,
 because they touch a UI a script can't click through, a mailbox only a human
-can check, or a credential no CLI is authorized to generate on its own.
+can check, or a credential no CLI is authorized to generate on its own — plus
+two entries (§1, §6) that are *recorded decisions* rather than tasks, written
+down so the limitation they describe isn't rediscovered from a code comment.
 
 ## 1. (Not planned) Human grading of the golden set
 
@@ -87,7 +89,38 @@ allow-list check.
   `*.vercel.app` URL, add it under the Vercel project's Settings → Domains,
   then update the Supabase redirect URL above to match.
 
-## 6. (Optional) Ask GitHub to purge a cached commit
+## 6. (Decision recorded) LaTeX resume PDFs are local-only
+
+Nothing to do unless you want to change the decision — this is here so the
+limitation is written down somewhere other than a code comment.
+
+`POST /api/jobs/[id]/pdf` prefers the v1 LaTeX pipeline: your real
+`resume.tex` with only the Technical Skills and Projects blocks replaced
+(`src/pdf/latex.ts`). It needs `pdflatex` on the machine doing the render.
+**Vercel has no TeX distribution**, so every download from
+`applyops-two.vercel.app` is the react-pdf template instead — the output you
+rated worse than v1. The Tailor tab now prints which renderer produced each
+file (from the `x-applyops-renderer` response header), so this is visible
+rather than silent.
+
+To get the LaTeX PDF, run it on this Mac (MacTeX is at `/Library/TeX/texbin`):
+
+```bash
+# once — loads your real resume into `resume_bases` (append-only; re-run to update)
+! npm run cli -- resume import-latex ~/Job_Auto_Apply/resume.tex --transcript ~/Job_Auto_Apply/public/documents/Transcript.pdf
+
+# per posting — writes out/<slug>.pdf and out/<slug>.tex, prints `renderer  latex`
+! npm run cli -- pdf <jobId>
+! npm run cli -- pdf <jobId> --transcript   # transcript appended with Ghostscript
+```
+
+If you ever want LaTeX in production, the change is to run the render on a
+host with TeX — the repo's `Dockerfile` is the natural place (add
+`texlive-latex-recommended` + `ghostscript` and move the PDF route's render
+behind a small job the container serves). That costs an always-on host, which
+is why it was not done for a one-person search.
+
+## 7. (Optional) Ask GitHub to purge a cached commit
 
 Early README screenshots were committed with the owner email unmasked, then
 rewritten out of history the same day (the commit no longer exists in the

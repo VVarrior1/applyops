@@ -16,11 +16,10 @@ import path from "node:path";
 import type { Command } from "commander";
 import { closeDb, getDirectDb } from "../../src/db/client";
 import {
-  PROJECTS_END_REGEX,
-  PROJECTS_START_REGEX,
   SKILLS_REGEX,
   assertSafeBaseLatex,
   extractBaseProjects,
+  projectsBlockWarning,
 } from "../../src/pdf/latex";
 import { insertLatexBase, uploadTranscript } from "../../src/pdf/resume-base";
 import { resolveUserId } from "../user-lookup";
@@ -68,11 +67,12 @@ export function register(program: Command): void {
           "no '%-----------TECHNICAL SKILLS-----------' block matched — tailored skills will NOT be spliced in",
         );
       }
-      if (!PROJECTS_START_REGEX.test(latex) || !PROJECTS_END_REGEX.test(latex)) {
-        warnings.push(
-          "no '%-----------PROJECTS-----------' … '\\resumeSubHeadingListEnd\\end{document}' block matched — tailored projects will NOT be spliced in",
-        );
-      }
+      // Covers all three ways the Projects splice can be skipped: no block at
+      // all, an unclosed list, or another `\section{...}` starting before the
+      // block's `\resumeSubHeadingListEnd` (see `findProjectsBlock`) — the
+      // last of which is a base layout ApplyOps deliberately refuses to touch.
+      const projectsProblem = projectsBlockWarning(latex);
+      if (projectsProblem) warnings.push(projectsProblem);
 
       let transcriptPdfPath: string | null = null;
       let transcriptBytes = 0;

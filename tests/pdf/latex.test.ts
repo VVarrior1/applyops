@@ -19,6 +19,7 @@ import {
   compileLatexToPdf,
   isLatexAvailable,
   latexToPlain,
+  projectsBlockWarning,
   renderLatexResume,
   replaceProjectsSection,
   replaceSkillsSection,
@@ -59,6 +60,61 @@ function middle(tex: string): string {
 /** Everything from `\resumeSubHeadingListEnd` to EOF: the document close. */
 function tail(tex: string): string {
   return tex.slice(tex.search(PROJECTS_END_REGEX));
+}
+
+/**
+ * The fixture's four banner-delimited sections, so a test can rebuild the
+ * same resume in a different order.
+ *
+ * The owner's own resume puts Projects last, and so did the only fixture —
+ * which is exactly the layout that hid the splice-boundary bug the
+ * `Projects is not the last section` describe below covers. Reordering the
+ * real fixture (rather than hand-writing a second one) keeps every section's
+ * bytes identical to the base they came from, which is what the
+ * byte-identity assertions are actually about.
+ */
+const BANNERS = {
+  skills: "%-----------TECHNICAL SKILLS-----------",
+  education: "%-----------EDUCATION-----------",
+  experience: "%-----------EXPERIENCE-----------",
+  projects: "%-----------PROJECTS-----------",
+} as const;
+
+type SectionName = keyof typeof BANNERS;
+
+/** The fixture's sections, in the order they appear in it. */
+const FIXTURE_ORDER: SectionName[] = ["skills", "education", "experience", "projects"];
+
+function splitSections(tex: string): {
+  header: string;
+  sections: Record<SectionName, string>;
+  close: string;
+} {
+  const at = {} as Record<SectionName, number>;
+  for (const name of FIXTURE_ORDER) {
+    at[name] = tex.indexOf(BANNERS[name]);
+    if (at[name] === -1) throw new Error(`fixture has no ${name} banner`);
+  }
+  const closeAt = tex.lastIndexOf("\\end{document}");
+  const bounds = [...FIXTURE_ORDER.map((n) => at[n]), closeAt];
+  const sections = {} as Record<SectionName, string>;
+  FIXTURE_ORDER.forEach((name, i) => {
+    sections[name] = tex.slice(bounds[i], bounds[i + 1]);
+  });
+  return { header: tex.slice(0, at.skills), sections, close: tex.slice(closeAt) };
+}
+
+/** The fixture rebuilt with its sections in `order`, bytes otherwise unchanged. */
+function reordered(order: SectionName[]): string {
+  const { header, sections, close } = splitSections(BASE);
+  return header + order.map((name) => sections[name]).join("") + close;
+}
+
+/** The slice of `tex` from one banner up to the next one (or `\end{document}`). */
+function sectionSlice(tex: string, name: SectionName, until: SectionName | "close"): string {
+  const from = tex.indexOf(BANNERS[name]);
+  const to = until === "close" ? tex.lastIndexOf("\\end{document}") : tex.indexOf(BANNERS[until]);
+  return tex.slice(from, to);
 }
 
 const TAILOR: TailorOutput = {
@@ -555,5 +611,208 @@ describe("compileLatexToPdf sandbox (real pdflatex)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  }, 180_000);
+});
+
+/**
+ * The splice boundary, for a base that is not laid out like the owner's.
+ *
+ * `projectsRegion` used to take the end of the Projects block from
+ * `PROJECTS_END_REGEX` (`\resumeSubHeadingListEnd\s*\end{document}`) matched
+ * over the whole document — the *last* list-end in the file, not the Projects
+ * section's own. Every fixture put Projects last, where those two are the same
+ * byte, so nothing caught it. Give it a base ordered Education → Projects →
+ * Experience and the whole Experience section was deleted; the result still
+ * compiled, so `compileLatexToPdf` never threw, the PDF route's catch never
+ * fired, and the download said `x-applyops-renderer: latex` over a resume
+ * with no work history.
+ */
+describe("a base whose Projects section is not the last one", () => {
+  const PROJECTS_MID = reordered(["skills", "education", "projects", "experience"]);
+
+  it("is a fixture the old end-anchor would have mis-parsed", () => {
+    // Both markers still "match" the document; that was the whole problem.
+    expect(PROJECTS_START_REGEX.test(PROJECTS_MID)).toBe(true);
+    expect(PROJECTS_END_REGEX.test(PROJECTS_MID)).toBe(true);
+    expect(projectsBlockWarning(PROJECTS_MID)).toBeNull();
+  });
+
+  it("keeps the Experience section — byte for byte — after the Projects splice", () => {
+    const { tex } = spliceTailoredResume(PROJECTS_MID, TAILOR);
+    expect(sectionSlice(tex, "experience", "close")).toBe(
+      sectionSlice(PROJECTS_MID, "experience", "close"),
+    );
+    expect(tex).toContain("\\section{Experience}");
+    expect(tex).toContain("{Northwind Labs}{November 2025 -- Present}");
+    expect(tex).toContain("{City Utilities Board}{September 2025 -- Present}");
+    expect(tex).toContain("{Contoso Retail}{March 2025 -- June 2025}");
+  });
+
+  it("keeps Education byte-identical too, and every section heading exactly once", () => {
+    const { tex } = spliceTailoredResume(PROJECTS_MID, TAILOR);
+    expect(sectionSlice(tex, "education", "projects")).toBe(
+      sectionSlice(PROJECTS_MID, "education", "projects"),
+    );
+    for (const heading of ["Technical Skills", "Education", "Experience", "Projects"]) {
+      expect(tex.match(new RegExp(`\\\\section\\{${heading}\\}`, "g"))).toHaveLength(1);
+    }
+  });
+
+  it("still does the two replacements it is supposed to do", () => {
+    const { tex, projectsSource } = spliceTailoredResume(PROJECTS_MID, TAILOR);
+    expect(projectsSource).toBe("derived");
+    expect(tex).toContain("\\textbf{Proficient}{: Go, PostgreSQL, Kubernetes, TypeScript}");
+    expect(tex).toContain("\\resumeItem{Built a Kanban app with role-based access control.}");
+    // The base's own project bullets are gone, replaced by the tailored ones
+    // (the base's project *headings* are reused on purpose — that is the
+    // point of splicing into the user's own document).
+    expect(tex).not.toContain("Engineered a recommender using Faiss vector databases");
+    expect(tex).not.toContain("Architected a gamified productivity platform");
+    // And the document did not shrink by a whole section: the old bug turned
+    // a 6.2 KB base into a 3.9 KB one.
+    expect(tex.length).toBeGreaterThan(PROJECTS_MID.length - 2_000);
+  });
+
+  it("finds the base's projects from the block, not from the rest of the file", () => {
+    expect(extractBaseProjects(PROJECTS_MID).map((p) => p.name)).toEqual(
+      extractBaseProjects(BASE).map((p) => p.name),
+    );
+  });
+});
+
+/**
+ * Canonical Jake's-template order: Education, Experience, Projects, Technical
+ * Skills. Here the document's last `\resumeSubHeadingListEnd` belongs to no
+ * list at all (Technical Skills closes with `\end{itemize}`), so
+ * `PROJECTS_END_REGEX` does not match and the old code skipped the projects
+ * splice entirely — a silent no-op rather than a corruption, but still wrong.
+ */
+describe("a base in canonical Jake's-template order", () => {
+  const JAKE = reordered(["education", "experience", "projects", "skills"]);
+
+  it("has no `\\resumeSubHeadingListEnd\\end{document}` for the old anchor to find", () => {
+    expect(PROJECTS_END_REGEX.test(JAKE)).toBe(false);
+    expect(projectsBlockWarning(JAKE)).toBeNull();
+  });
+
+  it("splices both blocks and leaves Education and Experience byte-identical", () => {
+    const { tex, projectsSource } = spliceTailoredResume(JAKE, TAILOR);
+    expect(projectsSource).toBe("derived");
+    expect(tex).toContain("\\textbf{Proficient}{: Go, PostgreSQL, Kubernetes, TypeScript}");
+    expect(tex).toContain("\\resumeItem{Built a Kanban app with role-based access control.}");
+    expect(sectionSlice(tex, "education", "experience")).toBe(
+      sectionSlice(JAKE, "education", "experience"),
+    );
+    expect(sectionSlice(tex, "experience", "projects")).toBe(
+      sectionSlice(JAKE, "experience", "projects"),
+    );
+    expect(tex).toContain("{Northwind Labs}{November 2025 -- Present}");
+    expect(tex.trimEnd().endsWith("\\end{document}")).toBe(true);
+  });
+});
+
+/**
+ * The refusal. If the forward search for `\resumeSubHeadingListEnd` runs past
+ * the end of the Projects block (an unclosed list) it will land inside a later
+ * section, and splicing there would delete it. Refusing leaves the user's own
+ * Projects block in the PDF, which is wrong-but-honest rather than silently
+ * destructive.
+ */
+describe("a base whose Projects list is never closed", () => {
+  const PROJECTS_MID = reordered(["skills", "education", "projects", "experience"]);
+  const LIST_END = "\\resumeSubHeadingListEnd";
+  const UNCLOSED = (() => {
+    const at = PROJECTS_MID.indexOf(BANNERS.projects);
+    const end = PROJECTS_MID.indexOf(LIST_END, at);
+    return PROJECTS_MID.slice(0, end) + PROJECTS_MID.slice(end + LIST_END.length);
+  })();
+
+  it("refuses the projects splice rather than eating the next section", () => {
+    const { tex, projectsSource } = spliceTailoredResume(UNCLOSED, TAILOR);
+    expect(projectsSource).toBe("base");
+    // Everything from Education onward — the base's own Projects block
+    // included — comes out exactly as it went in.
+    expect(tex.slice(tex.indexOf(BANNERS.education))).toBe(
+      UNCLOSED.slice(UNCLOSED.indexOf(BANNERS.education)),
+    );
+    expect(tex).toContain("Fashion Recommendation Engine");
+    expect(tex).toContain("{Northwind Labs}{November 2025 -- Present}");
+    // The skills splice is independent and still runs.
+    expect(tex).toContain("\\textbf{Proficient}{: Go, PostgreSQL, Kubernetes, TypeScript}");
+  });
+
+  it("is what `applyops resume import-latex` warns about", () => {
+    expect(projectsBlockWarning(UNCLOSED)).toContain("\\section{...}");
+    expect(projectsBlockWarning(BASE)).toBeNull();
+    expect(projectsBlockWarning("\\documentclass{article}\\begin{document}hi\\end{document}")).toContain(
+      "PROJECTS",
+    );
+  });
+});
+
+/**
+ * The Familiar line is user LaTeX, and `[^}]*` stopped at the first `}` of any
+ * macro inside it — then `replaceSkillsSection` wrote that truncation back
+ * over the real line, deleting the rest of the user's Familiar skills.
+ */
+describe("a Familiar line containing braced macros", () => {
+  const FAMILIAR_WITH_MACROS =
+    "\\textbf{Familiar}{: C, \\textbf{AWS}, \\href{https://k8s.example}{Kubernetes}, CI/CD}";
+  const WITH_MACROS = BASE.replace(
+    "\\textbf{Familiar}{: C, C++, C\\#, AWS, CI/CD,  Agile Methodologies, UX/UI Principles}",
+    FAMILIAR_WITH_MACROS,
+  );
+
+  it("was actually substituted into the fixture", () => {
+    expect(WITH_MACROS).toContain(FAMILIAR_WITH_MACROS);
+    expect(WITH_MACROS).not.toBe(BASE);
+  });
+
+  it("survives the splice whole, macros and all", () => {
+    const out = replaceSkillsSection(WITH_MACROS, ["Go", "TypeScript"]);
+    expect(out).toContain(FAMILIAR_WITH_MACROS);
+    // The tell-tale of the old truncation: the list cut off at `\textbf{AWS`.
+    expect(out).not.toContain("\\textbf{Familiar}{: C, \\textbf{AWS}\n");
+    expect(out).toContain("\\textbf{Proficient}{: Go, TypeScript}");
+  });
+
+  it("still filters a tailored skill the base lists as Familiar inside a macro", () => {
+    const out = replaceSkillsSection(WITH_MACROS, ["Go", "AWS", "Kubernetes"]);
+    expect(out).toContain("\\textbf{Proficient}{: Go}");
+    expect(out).toContain(FAMILIAR_WITH_MACROS);
+  });
+});
+
+/**
+ * The end of the same story, through a real compiler: the reordered base must
+ * come out of `pdflatex` with its Experience section in the PDF. This is the
+ * check that would have caught the original bug — the mangled `.tex` compiled
+ * cleanly to a 75 KB PDF with no work history in it.
+ */
+describe("renderLatexResume keeps every section of a Projects-in-the-middle base (real pdflatex)", () => {
+  it("puts the Experience section in the PDF", async ({ skip }) => {
+    if (!(await isLatexAvailable())) {
+      skip();
+      return;
+    }
+    const PROJECTS_MID = reordered(["skills", "education", "projects", "experience"]);
+    const result = await renderLatexResume({ base: { latex: PROJECTS_MID }, tailor: TAILOR });
+    expect(result.pdf.subarray(0, 4).toString("latin1")).toBe("%PDF");
+    expect(result.tex).toContain("{Northwind Labs}{November 2025 -- Present}");
+
+    let text: string;
+    try {
+      text = execFileSync("pdftotext", ["-", "-"], {
+        input: result.pdf,
+        encoding: "utf-8",
+        maxBuffer: 8 * 1024 * 1024,
+      });
+    } catch {
+      return; // no poppler on this host
+    }
+    expect(text).toContain("Northwind Labs");
+    expect(text).toContain("City Utilities Board");
+    expect(text).toContain("State University");
+    expect(text).toContain("Built a Kanban app with role-based access control.");
   }, 180_000);
 });
