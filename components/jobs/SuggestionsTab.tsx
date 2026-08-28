@@ -1,11 +1,23 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HallucinationReport } from "./HallucinationReport";
 import type { SuggestOutput } from "@/src/pipeline/schemas";
 import type { HallucinationReport as HallucinationReportData } from "@/src/pipeline/hallucination";
+
+/** What `/jobs/[id]` loads server-side for the most recent `suggest` generation, if any. */
+export interface SuggestInitialGeneration {
+  output: SuggestOutput;
+  hallucination: HallucinationReportData;
+}
+
+export interface SuggestionsTabProps {
+  jobId: string;
+  initialGeneration: SuggestInitialGeneration | null;
+}
 
 async function parseErrorBody(res: Response): Promise<string> {
   try {
@@ -43,11 +55,14 @@ function FactChips({ ids }: { ids: string[] }) {
  * block, only the hallucination check on `lead_with`/`weekend_build` shown
  * for transparency.
  */
-export function SuggestionsTab({ jobId }: { jobId: string }) {
+export function SuggestionsTab({ jobId, initialGeneration }: SuggestionsTabProps) {
+  const router = useRouter();
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [output, setOutput] = useState<SuggestOutput | null>(null);
-  const [hallucination, setHallucination] = useState<HallucinationReportData | null>(null);
+  const [output, setOutput] = useState<SuggestOutput | null>(initialGeneration?.output ?? null);
+  const [hallucination, setHallucination] = useState<HallucinationReportData | null>(
+    initialGeneration?.hallucination ?? null,
+  );
 
   async function handleGenerate() {
     setGenerating(true);
@@ -64,6 +79,8 @@ export function SuggestionsTab({ jobId }: { jobId: string }) {
       };
       setOutput(body.output);
       setHallucination(body.hallucination);
+      // Refresh server props (plan point 2) so a later reload sees this run.
+      router.refresh();
     } catch {
       setError("Couldn't reach the server. Try again.");
     } finally {

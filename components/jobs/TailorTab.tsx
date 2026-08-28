@@ -8,9 +8,26 @@ import { Textarea } from "@/components/ui/textarea";
 import { HallucinationReport } from "./HallucinationReport";
 import type { TailorOutput } from "@/src/pipeline/schemas";
 import type { HallucinationReport as HallucinationReportData } from "@/src/pipeline/hallucination";
+import { tailorBulletPath, type TailorUserEdits } from "@/src/pipeline/tailor-edits";
+
+/** What `/jobs/[id]` loads server-side for the most recent `tailor` generation, if any. */
+export interface TailorInitialGeneration {
+  generationId: string;
+  output: TailorOutput;
+  hallucination: HallucinationReportData;
+  /** The persisted `tailor_edit` overlay (`generations.user_edits`), if the user edited this run before. */
+  userEdits: TailorUserEdits | null;
+}
+
+export interface TailorTabProps {
+  jobId: string;
+  initialGeneration: TailorInitialGeneration | null;
+}
 
 interface EditableBullet {
   text: string;
+  /** The model's original text — an edit is anything that diverges from this. */
+  originalText: string;
   factIds: string[];
   /** Pointer into the original output, e.g. `sections[0].bullets[1]` — matches `checkCitations()`'s `path`. */
   path: string;
@@ -34,22 +51,37 @@ async function parseErrorBody(res: Response): Promise<string> {
   }
 }
 
-function toEditableSections(
+/**
+ * Builds the editable state from a generation's raw output plus (optionally)
+ * a previously-persisted `tailor_edit` overlay: edited text is substituted
+ * in, and explicitly-excluded bullets start unchecked — same overlay
+ * {@link applyTailorEdits} in `src/pipeline/tailor-edits.ts` reconstructs
+ * for the PDF, just kept as a bullet-level `included` flag here instead of
+ * actually dropping bullets, since the UI still needs to show and let the
+ * user re-check them. A hallucination-blocked bullet is always unchecked
+ * and locked, regardless of any stored overlay — that exclusion is derived
+ * fresh from the *current* facts on every load, never stored.
+ */
+function buildEditableSections(
   output: TailorOutput,
   hallucination: HallucinationReportData,
+  userEdits: TailorUserEdits | null,
 ): EditableSection[] {
   const unsupportedPaths = new Set(hallucination.unsupported.map((claim) => claim.path));
+  const editedText = userEdits?.editedText ?? {};
+  const excludedPaths = new Set(userEdits?.excludedPaths ?? []);
   return output.sections.map((section, s) => ({
     heading: section.heading,
     bullets: section.bullets.map((bullet, b) => {
-      const path = `sections[${s}].bullets[${b}]`;
+      const path = tailorBulletPath(s, b);
       const unsupported = unsupportedPaths.has(path);
       return {
-        text: bullet.text,
+        text: editedText[path] ?? bullet.text,
+        originalText: bullet.text,
         factIds: bullet.fact_ids,
         path,
         unsupported,
-        included: !unsupported,
+        included: unsupported ? false : !excludedPaths.has(path),
       };
     }),
   }));
@@ -88,22 +120,37 @@ function FactChips({ ids }: { ids: string[] }) {
   );
 }
 
-export function TailorTab({ jobId }: { jobId: string }) {
+export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
   const router = useRouter();
 
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
-  const [summary, setSummary] = useState<string | null>(null);
-  const [skills, setSkills] = useState<string[]>([]);
-  const [sections, setSections] = useState<EditableSection[]>([]);
-  const [hallucination, setHallucination] = useState<HallucinationReportData | null>(null);
-  const [generationId, setGenerationId] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(initialGeneration?.output.summary ?? null);
+  const [skills, setSkills] = useState<string[]>(initialGeneration?.output.skills ?? []);
+  const [sections, setSections] = useState<EditableSection[]>(() =>
+    initialGeneration
+      ? buildEditableSections(
+          initialGeneration.output,
+          initialGeneration.hallucination,
+          initialGeneration.userEdits,
+        )
+      : [],
+  );
+  const [hallucination, setHallucination] = useState<HallucinationReportData | null>(
+    initialGeneration?.hallucination ?? null,
+  );
+  const [generationId, setGenerationId] = useState<string | null>(
+    initialGeneration?.generationId ?? null,
+  );
 
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const [marking, setMarking] = useState(false);
   const [markError, setMarkError] = useState<string | null>(null);
+
+  const [savingEdits, setSavingEdits] = useState(false);
+  const [editsError, setEditsError] = useState<string | null>(null);
 
   const generated = summary !== null;
 
@@ -123,15 +170,59 @@ export function TailorTab({ jobId }: { jobId: string }) {
       };
       setSummary(body.output.summary);
       setSkills(body.output.skills);
-      setSections(toEditableSections(body.output, body.hallucination));
+      // A brand-new generation has no overlay yet.
+      setSections(buildEditableSections(body.output, body.hallucination, null));
       setHallucination(body.hallucination);
       setGenerationId(body.generationId);
       setDownloadError(null);
       setMarkError(null);
+      setEditsError(null);
+      // Refresh server props (plan point 2) — e.g. the page-level verdict
+      // badge can depend on state derived from this job going forward, and
+      // a later reload should see this run as the latest one immediately.
+      router.refresh();
     } catch {
       setGenerateError("Couldn't reach the server. Try again.");
     } finally {
       setGenerating(false);
+    }
+  }
+
+  /**
+   * Persists the current diff against the original output as the
+   * `tailor_edit` overlay (`PATCH .../tailor/edits`) — plan point 3.
+   * Called on bullet blur/toggle, never per keystroke (spec, and the
+   * route's own doc comment). Fire-and-forget from the caller's
+   * perspective: it reports a save error inline but never blocks typing.
+   */
+  async function persistEdits(nextSections: EditableSection[]) {
+    if (!generationId) return;
+    const editedText: Record<string, string> = {};
+    const excludedPaths: string[] = [];
+    for (const section of nextSections) {
+      for (const bullet of section.bullets) {
+        if (bullet.text !== bullet.originalText) editedText[bullet.path] = bullet.text;
+        // A hallucination-blocked bullet is never "excluded" by the user —
+        // it's excluded by the current facts, re-derived on every load, so
+        // storing it here would be redundant (and stale once facts change).
+        if (!bullet.included && !bullet.unsupported) excludedPaths.push(bullet.path);
+      }
+    }
+    setSavingEdits(true);
+    setEditsError(null);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/tailor/edits`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ generationId, userEdits: { editedText, excludedPaths } }),
+      });
+      if (!res.ok) {
+        setEditsError(await parseErrorBody(res));
+      }
+    } catch {
+      setEditsError("Couldn't save your edits. Try again.");
+    } finally {
+      setSavingEdits(false);
     }
   }
 
@@ -151,19 +242,19 @@ export function TailorTab({ jobId }: { jobId: string }) {
   }
 
   function toggleBulletIncluded(sectionIdx: number, bulletIdx: number) {
-    setSections((prev) =>
-      prev.map((section, s) =>
-        s !== sectionIdx
-          ? section
-          : {
-              ...section,
-              bullets: section.bullets.map((bullet, b) => {
-                if (b !== bulletIdx || bullet.unsupported) return bullet;
-                return { ...bullet, included: !bullet.included };
-              }),
-            },
-      ),
+    const next = sections.map((section, s) =>
+      s !== sectionIdx
+        ? section
+        : {
+            ...section,
+            bullets: section.bullets.map((bullet, b) => {
+              if (b !== bulletIdx || bullet.unsupported) return bullet;
+              return { ...bullet, included: !bullet.included };
+            }),
+          },
     );
+    setSections(next);
+    void persistEdits(next);
   }
 
   async function handleDownload() {
@@ -250,6 +341,9 @@ export function TailorTab({ jobId }: { jobId: string }) {
 
           {hallucination && <HallucinationReport report={hallucination} />}
 
+          {savingEdits && <p className="text-xs text-muted-foreground">Saving edits…</p>}
+          {editsError && <p className="text-sm text-destructive">{editsError}</p>}
+
           <div className="flex flex-col gap-1.5">
             <h3 className="text-sm font-semibold">Summary</h3>
             <p className="text-sm text-muted-foreground">{summary}</p>
@@ -293,6 +387,7 @@ export function TailorTab({ jobId }: { jobId: string }) {
                       <Textarea
                         value={bullet.text}
                         onChange={(event) => updateBulletText(s, b, event.target.value)}
+                        onBlur={() => void persistEdits(sections)}
                         rows={2}
                         className="flex-1"
                       />

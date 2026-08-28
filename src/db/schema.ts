@@ -21,6 +21,7 @@ import type {
   Fact,
   GuideOutput,
 } from "../pipeline/schemas";
+import type { TailorUserEdits } from "../pipeline/tailor-edits";
 
 /**
  * Drizzle schema for ApplyOps — spec §4 ("Data model").
@@ -116,6 +117,21 @@ export const applicationStatusEnum = pgEnum("application_status", [
  * system prompt is rebuilt from live profile data on every request rather than
  * stored, so a fact the user edits is reflected in the next turn. */
 export const chatRoleEnum = pgEnum("chat_role", ["user", "assistant"]);
+
+/**
+ * How a user's base resume is stored (see `resumeBases`).
+ *
+ * `latex` — the real `.tex` document the user actually applies with (v1's
+ * `resume.tex`). Tailoring splices new Technical Skills / Projects blocks
+ * into it and compiles with `pdflatex`, so everything the user hand-tuned
+ * (heading, education, experience, spacing) survives byte-for-byte.
+ * `structured` — a JSON resume for users who have no LaTeX of their own;
+ * rendered by the react-pdf template instead. Reserved for that path.
+ */
+export const resumeBaseKindEnum = pgEnum("resume_base_kind", [
+  "latex",
+  "structured",
+]);
 
 export const workAuthSignalEnum = pgEnum("work_auth_signal", [
   "hires_canadians",
@@ -283,6 +299,13 @@ export const generations = pgTable(
     costUsd: numeric("cost_usd", { precision: 10, scale: 6 }),
     latencyMs: integer("latency_ms"),
     output: jsonb("output").$type<unknown>(),
+    // Additive, nullable overlay on a `tailor` generation's `output` — the
+    // user's retyped bullet text and explicitly-unchecked bullets (spec:
+    // "store them as a 'tailor_edit' overlay on the generation"). Never set
+    // for any other step. `output` itself stays exactly what the model
+    // returned; apply this via `applyTailorEdits()` (src/pipeline/tailor-edits.ts)
+    // to get what the user actually sees/downloads.
+    userEdits: jsonb("user_edits").$type<TailorUserEdits>(),
     error: text("error"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -513,6 +536,57 @@ export const chatMessages = pgTable(
       .defaultNow(),
   },
   (t) => [index("chat_messages_thread_created_idx").on(t.threadId, t.createdAt)],
+);
+
+// ---------------------------------------------------------------------------
+// Base resume (v1 parity — the real document tailoring starts from)
+// ---------------------------------------------------------------------------
+
+/**
+ * A user's *base* resume: the document a tailored PDF is derived from, rather
+ * than generated from scratch.
+ *
+ * v1's whole resume pipeline was "take the candidate's real `resume.tex`,
+ * replace two blocks, run `pdflatex`" — so the education, experience,
+ * heading, and typography the owner spent years tuning came out byte-identical
+ * every time and only the parts that *should* change per posting did. v2's
+ * first cut instead re-drew the page with react-pdf from the tailor step's
+ * output alone, which is why the owner reported v2's PDFs as worse than v1's.
+ * This table restores the v1 model: `latex` holds that `.tex` source, and
+ * `src/pdf/latex.ts` splices into it.
+ *
+ * Rows are append-only — importing a new resume adds a row, and the newest
+ * row for a user is the live base — so a tailored PDF produced last month can
+ * still be explained by the base that existed then.
+ *
+ * `transcript_pdf_path` is a Supabase Storage path in the private `resumes`
+ * bucket (`src/profile/storage.ts`), not a public URL: v1 optionally
+ * Ghostscript-merged the candidate's transcript onto the end of the resume
+ * for postings that ask for one.
+ *
+ * `onDelete: "cascade"` from `profiles` for the same reason `guides` has it —
+ * `deleteUserData()` (src/profile/facts.ts) deletes `profiles` last and knows
+ * nothing about tables added after it was written.
+ */
+export const resumeBases = pgTable(
+  "resume_bases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => profiles.userId, { onDelete: "cascade" }),
+    kind: resumeBaseKindEnum("kind").notNull().default("latex"),
+    /** The full `.tex` source. Non-null exactly when `kind = 'latex'`. */
+    latex: text("latex"),
+    /** A JSON resume. Non-null exactly when `kind = 'structured'`. */
+    structured: jsonb("structured").$type<unknown>(),
+    /** `${userId}/transcript-<ts>.pdf` in the private `resumes` bucket. */
+    transcriptPdfPath: text("transcript_pdf_path"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("resume_bases_user_created_idx").on(t.userId, t.createdAt)],
 );
 
 export const usageDaily = pgTable(

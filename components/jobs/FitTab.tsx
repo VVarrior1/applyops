@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { FitOutput } from "@/src/pipeline/schemas";
@@ -54,6 +55,7 @@ function scoreTone(score: number): string {
  * posting was successfully analyzed.
  */
 export function FitTab({ jobId, initialAnalyzed, initialFit, initialKeywordScore }: FitTabProps) {
+  const router = useRouter();
   const [fit, setFit] = useState<FitOutput | null>(initialFit);
   const [scoring, setScoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +76,10 @@ export function FitTab({ jobId, initialAnalyzed, initialFit, initialKeywordScore
       }
       const body = (await fitRes.json()) as { output: FitOutput };
       setFit(body.output);
+      // Refresh server props (plan point 2) — the page-level "worth
+      // applying?" verdict badge depends on this job's fit score and only
+      // updates via a server re-render.
+      router.refresh();
     } catch {
       setError("Couldn't reach the server. Try again.");
     } finally {

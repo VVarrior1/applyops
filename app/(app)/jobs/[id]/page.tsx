@@ -3,18 +3,20 @@ import { and, eq, inArray } from "drizzle-orm";
 import { format } from "date-fns";
 import { requireUser } from "@/src/auth/require";
 import { getDb } from "@/src/db/client";
-import { applications, companies, jobs, jobScores } from "@/src/db/schema";
+import { applications, companies, generations, jobs, jobScores } from "@/src/db/schema";
 import { DEFAULT_MODEL_BY_STEP } from "@/src/llm/defaults";
-import type { FitOutput } from "@/src/pipeline/schemas";
-import { getPrefs, type SearchPrefsRow } from "@/src/profile/facts";
+import { checkCitations } from "@/src/pipeline/hallucination";
+import { latestGenerationByStep } from "@/src/pipeline/generations";
+import { SuggestOutput, TailorOutput, type FitOutput } from "@/src/pipeline/schemas";
+import { factLabels } from "@/src/pipeline/steps";
+import { getConfirmedFacts, getPrefs, type SearchPrefsRow } from "@/src/profile/facts";
 import { fitRankerVersion, KEYWORD_RANKER_VERSION } from "@/src/rank/rank";
 import { assessJob, type VerdictInput } from "@/src/rank/verdict";
-import { FitTab } from "@/components/jobs/FitTab";
-import { PostingTab } from "@/components/jobs/PostingTab";
-import { SuggestionsTab } from "@/components/jobs/SuggestionsTab";
-import { TailorTab } from "@/components/jobs/TailorTab";
+import { isJobDetailTab } from "@/components/jobs/job-detail-tab";
+import { JobDetailTabs } from "@/components/jobs/JobDetailTabs";
+import type { SuggestInitialGeneration } from "@/components/jobs/SuggestionsTab";
+import type { TailorInitialGeneration } from "@/components/jobs/TailorTab";
 import { VerdictBadge } from "@/components/jobs/VerdictBadge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type VerdictPrefs = NonNullable<VerdictInput["prefs"]>;
 
@@ -47,11 +49,15 @@ function toVerdictPrefs(prefs: SearchPrefsRow | null): VerdictPrefs | null {
  */
 export default async function JobDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const user = await requireUser();
   const { id: jobId } = await params;
+  const sp = await searchParams;
+  const initialTab = isJobDetailTab(sp.tab) ? sp.tab : "posting";
   const db = getDb();
 
   const [jobRow] = await db
@@ -85,7 +91,7 @@ export default async function JobDetailPage({
   const analysis = jobRow.analysis;
 
   const fitVersion = fitRankerVersion(DEFAULT_MODEL_BY_STEP.fit);
-  const [scoreRows, prefs, appliedRows] = await Promise.all([
+  const [scoreRows, prefs, appliedRows, genRows, facts] = await Promise.all([
     db
       .select({
         rankerVersion: jobScores.rankerVersion,
@@ -108,6 +114,32 @@ export default async function JobDetailPage({
       .from(applications)
       .where(and(eq(applications.userId, user.id), eq(applications.jobId, jobRow.id)))
       .limit(1),
+    // Every `tailor`/`suggest` generation for this job+user — reduced to
+    // "the latest one per step" below by `latestGenerationByStep` (spec:
+    // "tailor and suggest from the generations table (step + jobId +
+    // userId, newest)"). `generations` keeps full history, so this is a
+    // handful of rows per job at most, not an unbounded scan.
+    db
+      .select({
+        id: generations.id,
+        step: generations.step,
+        output: generations.output,
+        userEdits: generations.userEdits,
+        createdAt: generations.createdAt,
+      })
+      .from(generations)
+      .where(
+        and(
+          eq(generations.jobId, jobRow.id),
+          eq(generations.userId, user.id),
+          inArray(generations.step, ["tailor", "suggest"]),
+        ),
+      ),
+    // Needed to re-derive each generation's hallucination report against
+    // the user's *current* confirmed facts (never stored — see
+    // `TailorInitialGeneration`'s doc comment), the same way `runTailor`/
+    // `runSuggest` compute it fresh on generation.
+    getConfirmedFacts(db, user.id),
   ]);
 
   const fitRow = scoreRows.find((row) => row.rankerVersion === fitVersion);
@@ -120,6 +152,31 @@ export default async function JobDetailPage({
         rationale: fitRow.rationale ?? "",
       }
     : null;
+
+  const latestGenByStep = latestGenerationByStep(genRows, ["tailor", "suggest"]);
+  const labels = factLabels(facts);
+
+  const tailorGenRow = latestGenByStep.get("tailor");
+  const tailorOutput = tailorGenRow ? TailorOutput.safeParse(tailorGenRow.output) : null;
+  const initialTailorGeneration: TailorInitialGeneration | null =
+    tailorGenRow && tailorOutput?.success
+      ? {
+          generationId: tailorGenRow.id,
+          output: tailorOutput.data,
+          hallucination: checkCitations(tailorOutput.data, labels),
+          userEdits: tailorGenRow.userEdits ?? null,
+        }
+      : null;
+
+  const suggestGenRow = latestGenByStep.get("suggest");
+  const suggestOutput = suggestGenRow ? SuggestOutput.safeParse(suggestGenRow.output) : null;
+  const initialSuggestGeneration: SuggestInitialGeneration | null =
+    suggestGenRow && suggestOutput?.success
+      ? {
+          output: suggestOutput.data,
+          hallucination: checkCitations(suggestOutput.data, labels),
+        }
+      : null;
 
   const { verdict, reasons } = assessJob({
     job: {
@@ -163,43 +220,26 @@ export default async function JobDetailPage({
         )}
       </div>
 
-      <Tabs defaultValue="posting">
-        <TabsList>
-          <TabsTrigger value="posting">Posting</TabsTrigger>
-          <TabsTrigger value="fit">Fit</TabsTrigger>
-          <TabsTrigger value="tailor">Tailor</TabsTrigger>
-          <TabsTrigger value="suggestions">Suggestions</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="posting">
-          <PostingTab
-            title={jobRow.title}
-            companyName={jobRow.companyName}
-            location={jobRow.location}
-            remote={jobRow.remote}
-            url={jobRow.url}
-            description={jobRow.description}
-            postedAt={jobRow.postedAt ? format(jobRow.postedAt, "MMM d, yyyy") : null}
-          />
-        </TabsContent>
-
-        <TabsContent value="fit">
-          <FitTab
-            jobId={jobRow.id}
-            initialAnalyzed={analysis != null}
-            initialFit={initialFit}
-            initialKeywordScore={keywordRow?.score ?? null}
-          />
-        </TabsContent>
-
-        <TabsContent value="tailor">
-          <TailorTab jobId={jobRow.id} />
-        </TabsContent>
-
-        <TabsContent value="suggestions">
-          <SuggestionsTab jobId={jobRow.id} />
-        </TabsContent>
-      </Tabs>
+      <JobDetailTabs
+        jobId={jobRow.id}
+        initialTab={initialTab}
+        posting={{
+          title: jobRow.title,
+          companyName: jobRow.companyName,
+          location: jobRow.location,
+          remote: jobRow.remote,
+          url: jobRow.url,
+          description: jobRow.description,
+          postedAt: jobRow.postedAt ? format(jobRow.postedAt, "MMM d, yyyy") : null,
+        }}
+        fit={{
+          initialAnalyzed: analysis != null,
+          initialFit,
+          initialKeywordScore: keywordRow?.score ?? null,
+        }}
+        initialTailorGeneration={initialTailorGeneration}
+        initialSuggestGeneration={initialSuggestGeneration}
+      />
     </div>
   );
 }
