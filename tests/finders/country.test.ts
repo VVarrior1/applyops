@@ -79,3 +79,12 @@ describe("world coverage and unrecognized geography", () => {
     expect(hasUnrecognizedGeography("Tiranë, Albania", ["AL"])).toBe(false);
   });
 });
+
+describe("explicit geography beats city guesses", () => {
+  it("Waterloo, Nebraska is US; Waterloo, ON is Canada; bare Waterloo is Canada", async () => {
+    const { detectCountries } = await import("../../src/finders/country");
+    expect(detectCountries("Waterloo, Nebraska, United States")).toEqual(["US"]);
+    expect(detectCountries("Waterloo, ON")).toEqual(["CA"]);
+    expect(detectCountries("Waterloo")).toEqual(["CA"]);
+  });
+});

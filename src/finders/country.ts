@@ -166,24 +166,24 @@ export function detectCountries(location: string | null | undefined, description
     const text = raw.replace(/\s+/g, " ").trim();
     if (!text) return [];
     const lower = text.toLowerCase();
-    const hits: Array<{ at: number; code: CountryCode }> = [];
+    const hits: Array<{ at: number; code: CountryCode; tier: 1 | 2 }> = [];
 
     // 1. Whole-phrase country names / aliases.
     for (const alias of Object.keys(NAME_ALIASES)) {
       const re = new RegExp(`(^|[^a-z])(${alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?=$|[^a-z])`, "gi");
       let m: RegExpExecArray | null;
-      while ((m = re.exec(lower)) !== null) hits.push({ at: m.index + m[1].length, code: NAME_ALIASES[alias] });
+      while ((m = re.exec(lower)) !== null) hits.push({ at: m.index + m[1].length, code: NAME_ALIASES[alias], tier: 1 });
     }
     // 1b. Bare uppercase "US" / "USA" / "UK" tokens (case-sensitive so "us" in prose is ignored).
     for (const [tok, code] of [["US", "US"], ["USA", "US"], ["UK", "GB"]] as const) {
       const re = new RegExp(`(^|[^A-Za-z])(${tok})(?=$|[^A-Za-z])`, "g");
       let m: RegExpExecArray | null;
-      while ((m = re.exec(text)) !== null) hits.push({ at: m.index + m[1].length, code });
+      while ((m = re.exec(text)) !== null) hits.push({ at: m.index + m[1].length, code, tier: 1 });
     }
 
     // 2. State / province full names.
-    for (const name of Object.values(US_STATES)) { const i = lower.search(new RegExp(`\\b${name.toLowerCase()}\\b`)); if (i >= 0) hits.push({ at: i, code: "US" }); }
-    for (const name of Object.values(CA_PROVINCES)) { const i = lower.search(new RegExp(`\\b${name.toLowerCase()}\\b`)); if (i >= 0) hits.push({ at: i, code: "CA" }); }
+    for (const name of Object.values(US_STATES)) { const i = lower.search(new RegExp(`\\b${name.toLowerCase()}\\b`)); if (i >= 0) hits.push({ at: i, code: "US", tier: 1 }); }
+    for (const name of Object.values(CA_PROVINCES)) { const i = lower.search(new RegExp(`\\b${name.toLowerCase()}\\b`)); if (i >= 0) hits.push({ at: i, code: "CA", tier: 1 }); }
 
     // 3. Two-letter state/province codes as standalone uppercase tokens after a
     //    separator (", AB", "(NY)", "- TX"). Provinces win on overlap; "CA" is
@@ -192,26 +192,30 @@ export function detectCountries(location: string | null | undefined, description
     let m: RegExpExecArray | null;
     while ((m = codeRe.exec(text)) !== null) {
       const code = m[1]; const at = m.index;
-      if (code in CA_PROVINCES) hits.push({ at, code: "CA" });
-      else if (code in US_STATES) hits.push({ at, code: "US" });
+      if (code in CA_PROVINCES) hits.push({ at, code: "CA", tier: 1 });
+      else if (code in US_STATES) hits.push({ at, code: "US", tier: 1 });
     }
 
     // 4. Well-known cities.
-    for (const city of US_CITIES) { const i = lower.indexOf(city); if (i >= 0) hits.push({ at: i, code: "US" }); }
-    for (const city of CA_CITIES) { const i = lower.indexOf(city); if (i >= 0) hits.push({ at: i, code: "CA" }); }
+    for (const city of US_CITIES) { const i = lower.indexOf(city); if (i >= 0) hits.push({ at: i, code: "US", tier: 2 }); }
+    for (const city of CA_CITIES) { const i = lower.indexOf(city); if (i >= 0) hits.push({ at: i, code: "CA", tier: 2 }); }
     // 5. World cities (unambiguous names only). "London" is the one real
     //    ambiguity: London, Ontario exists — it is GB unless ON/Ontario appears.
     for (const [city, code] of Object.entries(WORLD_CITIES)) {
       const re = new RegExp(`(^|[^a-zà-ÿ])${city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=$|[^a-zà-ÿ])`, "i");
       const m2 = re.exec(lower);
-      if (m2) hits.push({ at: m2.index + m2[1].length, code });
+      if (m2) hits.push({ at: m2.index + m2[1].length, code, tier: 2 });
     }
     const londonAt = lower.search(/(^|[^a-z])london(?=$|[^a-z])/);
-    if (londonAt >= 0) hits.push({ at: londonAt, code: /\b(on|ont|ontario|canada)\b/.test(lower) ? "CA" : "GB" });
+    if (londonAt >= 0) hits.push({ at: londonAt, code: /\b(on|ont|ontario|canada)\b/.test(lower) ? "CA" : "GB", tier: 2 });
 
-    hits.sort((a, b) => a.at - b.at);
+    // Explicit country/state/province mentions (tier 1) beat city-name
+    // guesses (tier 2): "Waterloo, Nebraska" is US, not Canada.
+    const tier1 = new Set(hits.filter((h) => h.tier === 1).map((h) => h.code));
+    const kept = tier1.size > 0 ? hits.filter((h) => h.tier === 1 || tier1.has(h.code)) : hits;
+    kept.sort((a, b) => a.at - b.at);
     const out: CountryCode[] = [];
-    for (const h of hits) addUnique(out, h.code);
+    for (const h of kept) addUnique(out, h.code);
     return out;
   };
 

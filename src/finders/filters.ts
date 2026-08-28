@@ -144,10 +144,16 @@ export function isEntryLevel(title: string, description: string): boolean {
 
   if (ENTRY_LEVEL_SIGNALS.some((re) => re.test(text))) return true;
 
-  // No explicit entry-level wording. Any experience requirement at all now
-  // disqualifies, and only a title that is *exactly* generic gets through.
-  if (ANY_YEARS.test(text)) return false;
-  return EXACT_GENERIC_TITLES.has(normalizeTitle(titleLower));
+  // No explicit entry-level wording. Since 2026-08-27 this is ALLOWED: most
+  // Canadian postings say plain "Software Engineer" with no seniority word,
+  // and requiring "new grad"/"junior" threw away ~90% of them (22 of 227
+  // non-senior Canadian engineering titles). Everything that signals
+  // seniority — senior/staff/lead titles, "3+ years", advanced degrees,
+  // "extensive experience" — was already rejected above; the fit score and
+  // the verdict handle the rest per user. "1-2 years" style asks stay in.
+  void ANY_YEARS;
+  void EXACT_GENERIC_TITLES;
+  return true;
 }
 
 /** "Software Engineer, New Grad (Remote)" → "software engineer, new grad". */

@@ -66,18 +66,20 @@ describe("isEntryLevel", () => {
     );
   });
 
-  it("rejects a non-generic title with no entry-level signal", () => {
+  it("accepts a non-senior title with no entry-level signal (relaxed 2026-08-27)", () => {
+    // Most Canadian postings say plain "Software Engineer"; only senior signals reject now.
     expect(
       isEntryLevel("Machine Learning Engineer, Ranking", "Build models."),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it("only counts a graduation year when it is in a graduation context", () => {
+  it("a stray year in a non-graduation context no longer matters (title has no senior signal)", () => {
+    // Relaxed rule: no senior signal → entry-level, regardless of graduation-year wording.
     // Bare "2026" is everywhere (copyright lines, "Updated 2026"), so it must
     // not on its own mark a job entry level.
     expect(
       isEntryLevel("Machine Learning Engineer", "© 2026 Acme Inc."),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       isEntryLevel("Machine Learning Engineer", "For the class of 2026."),
     ).toBe(true);

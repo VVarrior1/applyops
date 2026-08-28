@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "../../src/db/client";
 import { jobs } from "../../src/db/schema";
 import { detectCountries } from "../../src/finders/country";
+import { isEntryLevel, isRelevantRole, detectWorkAuth } from "../../src/finders/filters";
 
 /**
  * `applyops jobs backfill-countries` — detect countries for every job whose
@@ -11,6 +12,38 @@ import { detectCountries } from "../../src/finders/country";
  */
 export function register(program: Command): void {
   const cmd = program.command("jobs").description("Job-table maintenance");
+
+  cmd
+    .command("backfill-flags")
+    .description("Recompute is_entry_level / is_relevant_role / work_auth_signal for every job from title+description (no LLM)")
+    .option("--batch <n>", "rows per batch", "2000")
+    .action(async (opts: { batch: string }) => {
+      const db = getDb();
+      const batch = Math.max(100, Number(opts.batch) || 2000);
+      let offset = 0, scanned = 0, entry = 0, relevant = 0;
+      for (;;) {
+        const rows = await db.select({ id: jobs.id, title: jobs.title, description: jobs.description, location: jobs.location }).from(jobs).orderBy(jobs.id).limit(batch).offset(offset);
+        if (rows.length === 0) break;
+        const payload = JSON.stringify(rows.map((r) => {
+          const e = isEntryLevel(r.title, r.description ?? ""); const rel = isRelevantRole(r.title);
+          if (e) entry += 1; if (rel) relevant += 1;
+          return { id: r.id, e, rel, wa: detectWorkAuth(`${r.location ?? ""} ${r.description ?? ""}`) };
+        }));
+        await db.execute(sql`
+          update jobs as j
+             set is_entry_level = (v.item->>'e')::boolean,
+                 is_relevant_role = (v.item->>'rel')::boolean,
+                 work_auth_signal = (v.item->>'wa')::work_auth_signal
+            from jsonb_array_elements(${payload}::jsonb) as v(item)
+           where j.id = (v.item->>'id')::uuid
+        `);
+        scanned += rows.length; offset += rows.length;
+        process.stdout.write(`\rscanned ${scanned} · entry ${entry} · relevant ${relevant}`);
+        if (rows.length < batch) break;
+      }
+      console.log(`\ndone: scanned ${scanned}, entry-level ${entry}, relevant-role ${relevant}`);
+      process.exit(0);
+    });
 
   cmd
     .command("backfill-countries")
