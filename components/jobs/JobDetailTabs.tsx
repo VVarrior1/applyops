@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FitTab, type FitTabProps } from "./FitTab";
 import { isJobDetailTab, type JobDetailTab } from "./job-detail-tab";
@@ -29,9 +29,17 @@ export interface JobDetailTabsProps {
  * since each tab's result shape (editable bullets, hallucination reports)
  * is naturally owned by that tab, not the page shell.
  *
- * `router.replace` (not `push`) so clicking between tabs doesn't pile up
- * back-button entries — the URL still reflects the active tab for a
- * refresh or a link shared mid-session, which is what the spec asks for.
+ * The URL update on tab change is a *shallow* one (`history.replaceState`,
+ * not `router.replace`) — the App Router treats a `router.replace` to a
+ * new `?tab=` as a client navigation and refetches this page's RSC
+ * payload (rerunning every query in the page's `Promise.all`, including
+ * `getConfirmedFacts` and both `checkCitations` passes) purely to change
+ * the URL, even though no tab actually consumes those refreshed props
+ * (each seeds its own `useState` once from the initial props). A plain
+ * history update still means the URL reflects the active tab for a
+ * refresh or a link shared mid-session, without the round trip.
+ * `router.refresh()` stays in each tab's own actions, where fresh server
+ * props are actually wanted.
  */
 export function JobDetailTabs({
   jobId,
@@ -41,7 +49,6 @@ export function JobDetailTabs({
   initialTailorGeneration,
   initialSuggestGeneration,
 }: JobDetailTabsProps) {
-  const router = useRouter();
   const pathname = usePathname();
   const [tab, setTab] = useState<JobDetailTab>(initialTab);
 
@@ -50,7 +57,9 @@ export function JobDetailTabs({
     setTab(next);
     const params = new URLSearchParams(window.location.search);
     params.set("tab", next);
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    // Shallow URL-only update — see the doc comment above for why this
+    // isn't `router.replace`.
+    window.history.replaceState(null, "", `${pathname}?${params.toString()}`);
   }
 
   return (

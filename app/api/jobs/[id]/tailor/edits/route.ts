@@ -4,14 +4,26 @@ import { z } from "zod";
 import { requireUser } from "@/src/auth/require";
 import { getDb } from "@/src/db/client";
 import { generations } from "@/src/db/schema";
-import { applyTailorEdits } from "@/src/pipeline/tailor-edits";
+import { applyTailorEdits, tailorBulletPath, type TailorUserEdits } from "@/src/pipeline/tailor-edits";
 import { TailorOutput } from "@/src/pipeline/schemas";
+
+// A real resume bullet is a line or two; a real tailor output is a handful
+// of sections with a handful of bullets each. These are generous upper
+// bounds, not tuned limits — they exist so a client can't write unbounded
+// junk into the jsonb column, not to constrain a legitimate edit.
+const MAX_BULLET_TEXT_LENGTH = 2000;
+const MAX_EDIT_ENTRIES = 200;
 
 const bodySchema = z.object({
   generationId: z.string().uuid(),
   userEdits: z.object({
-    editedText: z.record(z.string(), z.string()).optional(),
-    excludedPaths: z.array(z.string()).optional(),
+    editedText: z
+      .record(z.string(), z.string().max(MAX_BULLET_TEXT_LENGTH))
+      .refine((obj) => Object.keys(obj).length <= MAX_EDIT_ENTRIES, {
+        message: `Too many edited bullets (max ${MAX_EDIT_ENTRIES}).`,
+      })
+      .optional(),
+    excludedPaths: z.array(z.string()).max(MAX_EDIT_ENTRIES).optional(),
   }),
 });
 
@@ -63,11 +75,27 @@ export async function PATCH(
     return NextResponse.json({ error: "That generation's output is malformed." }, { status: 500 });
   }
 
+  // The only paths that can legitimately mean anything: `sections[i].bullets[j]`
+  // for a real (section, bullet) pair in *this* generation's actual output.
+  // A key/path outside that set (stale, tampered, or referring to a bullet
+  // that never existed) is dropped rather than stored — it would otherwise
+  // land in the jsonb column unchanged and just sit there silently ignored
+  // by `applyTailorEdits`.
+  const validPaths = new Set(
+    output.data.sections.flatMap((section, s) => section.bullets.map((_, b) => tailorBulletPath(s, b))),
+  );
+  const sanitizedUserEdits: TailorUserEdits = {
+    editedText: Object.fromEntries(
+      Object.entries(userEdits.editedText ?? {}).filter(([path]) => validPaths.has(path)),
+    ),
+    excludedPaths: (userEdits.excludedPaths ?? []).filter((path) => validPaths.has(path)),
+  };
+
   // Refuse an overlay that would leave nothing to tailor at all — the same
   // floor `stripUnsupportedBullets` implicitly enforces for hallucination
   // exclusions (an empty resume was never a state the pipeline could
   // reach); here it's a user-editable state, so it needs an explicit check.
-  const effective = applyTailorEdits(output.data, userEdits);
+  const effective = applyTailorEdits(output.data, sanitizedUserEdits);
   if (effective.sections.length === 0) {
     return NextResponse.json(
       { error: "That would exclude every bullet — leave at least one." },
@@ -75,7 +103,10 @@ export async function PATCH(
     );
   }
 
-  await db.update(generations).set({ userEdits }).where(eq(generations.id, generationId));
+  await db
+    .update(generations)
+    .set({ userEdits: sanitizedUserEdits })
+    .where(eq(generations.id, generationId));
 
   return NextResponse.json({ ok: true });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -151,6 +151,10 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
 
   const [savingEdits, setSavingEdits] = useState(false);
   const [editsError, setEditsError] = useState<string | null>(null);
+  /** The overlay body (stringified) of the last successfully-saved PATCH — lets `persistEdits` skip a no-op write. */
+  const lastSavedEditsRef = useRef<string | null>(null);
+  /** Chains every `persistEdits` PATCH after the previous one settles, so concurrent calls (a blur racing a toggle) hit the server strictly in the order they were issued instead of overlapping and letting an older snapshot land last. */
+  const pendingEditsRef = useRef<Promise<unknown>>(Promise.resolve());
 
   const generated = summary !== null;
 
@@ -174,6 +178,9 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
       setSections(buildEditableSections(body.output, body.hallucination, null));
       setHallucination(body.hallucination);
       setGenerationId(body.generationId);
+      // A brand-new generation has no overlay yet — don't let the previous
+      // generation's last-saved snapshot suppress its first real save.
+      lastSavedEditsRef.current = null;
       setDownloadError(null);
       setMarkError(null);
       setEditsError(null);
@@ -192,11 +199,25 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
    * Persists the current diff against the original output as the
    * `tailor_edit` overlay (`PATCH .../tailor/edits`) — plan point 3.
    * Called on bullet blur/toggle, never per keystroke (spec, and the
-   * route's own doc comment). Fire-and-forget from the caller's
-   * perspective: it reports a save error inline but never blocks typing.
+   * route's own doc comment).
+   *
+   * Returns whether the overlay is now what the server has (`true` for an
+   * actual save, or a skipped no-op; `false` on a rejected/failed PATCH) —
+   * callers that made an optimistic UI change (e.g. the exclude checkbox)
+   * use this to decide whether to keep it or roll it back.
+   *
+   * Two guards on top of the plain PATCH:
+   * - No-op skip: if this exact overlay is what was last saved (e.g. the
+   *   user tabbed through a bullet without editing it), skip the network
+   *   round trip entirely rather than re-saving an unchanged snapshot.
+   * - Ordering: writes are chained through `pendingEditsRef` so a blur and
+   *   a toggle fired in quick succession hit the server in the order they
+   *   were issued, instead of two overlapping PATCHes racing and letting
+   *   whichever response lands second silently overwrite the newer edit
+   *   with an older snapshot.
    */
-  async function persistEdits(nextSections: EditableSection[]) {
-    if (!generationId) return;
+  function persistEdits(nextSections: EditableSection[]): Promise<boolean> {
+    if (!generationId) return Promise.resolve(true);
     const editedText: Record<string, string> = {};
     const excludedPaths: string[] = [];
     for (const section of nextSections) {
@@ -208,22 +229,36 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
         if (!bullet.included && !bullet.unsupported) excludedPaths.push(bullet.path);
       }
     }
-    setSavingEdits(true);
-    setEditsError(null);
-    try {
-      const res = await fetch(`/api/jobs/${jobId}/tailor/edits`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ generationId, userEdits: { editedText, excludedPaths } }),
-      });
-      if (!res.ok) {
-        setEditsError(await parseErrorBody(res));
+    const overlay = { editedText, excludedPaths };
+    const serialized = JSON.stringify(overlay);
+    if (serialized === lastSavedEditsRef.current) return Promise.resolve(true);
+
+    const run = pendingEditsRef.current.then(async () => {
+      setSavingEdits(true);
+      setEditsError(null);
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/tailor/edits`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ generationId, userEdits: overlay }),
+        });
+        if (!res.ok) {
+          setEditsError(await parseErrorBody(res));
+          return false;
+        }
+        lastSavedEditsRef.current = serialized;
+        return true;
+      } catch {
+        setEditsError("Couldn't save your edits. Try again.");
+        return false;
+      } finally {
+        setSavingEdits(false);
       }
-    } catch {
-      setEditsError("Couldn't save your edits. Try again.");
-    } finally {
-      setSavingEdits(false);
-    }
+    });
+    // Keep the chain alive even after a failed save — a subsequent PATCH
+    // should still queue behind this one rather than reset the chain.
+    pendingEditsRef.current = run;
+    return run;
   }
 
   function updateBulletText(sectionIdx: number, bulletIdx: number, text: string) {
@@ -242,6 +277,7 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
   }
 
   function toggleBulletIncluded(sectionIdx: number, bulletIdx: number) {
+    const previous = sections;
     const next = sections.map((section, s) =>
       s !== sectionIdx
         ? section
@@ -254,7 +290,12 @@ export function TailorTab({ jobId, initialGeneration }: TailorTabProps) {
           },
     );
     setSections(next);
-    void persistEdits(next);
+    // Optimistic — snap back to `previous` if the server rejects the save
+    // (e.g. the exclude-all guard), so the checkbox never lies about what
+    // is actually persisted.
+    void persistEdits(next).then((ok) => {
+      if (!ok) setSections(previous);
+    });
   }
 
   async function handleDownload() {

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { format } from "date-fns";
 import { requireUser } from "@/src/auth/require";
 import { getDb } from "@/src/db/client";
@@ -133,6 +133,12 @@ export default async function JobDetailPage({
           eq(generations.jobId, jobRow.id),
           eq(generations.userId, user.id),
           inArray(generations.step, ["tailor", "suggest"]),
+          // A terminal LLM failure is stored as its own generations row
+          // (output: null, error: <message>) so it never wins over an
+          // older, actually-usable result just because it's newer — see
+          // `src/pipeline/generations.ts`.
+          isNull(generations.error),
+          isNotNull(generations.output),
         ),
       ),
     // Needed to re-derive each generation's hallucination report against
@@ -153,7 +159,15 @@ export default async function JobDetailPage({
       }
     : null;
 
-  const latestGenByStep = latestGenerationByStep(genRows, ["tailor", "suggest"]);
+  // A row that made it past the query filter above still has to satisfy
+  // the *current* Zod schema — a stored output can predate a schema
+  // change (e.g. `TailorOutput` just gained `projects`). Fall back through
+  // older rows for that step rather than collapsing to "never generated".
+  const latestGenByStep = latestGenerationByStep(genRows, ["tailor", "suggest"], (row) => {
+    if (row.step === "tailor") return TailorOutput.safeParse(row.output).success;
+    if (row.step === "suggest") return SuggestOutput.safeParse(row.output).success;
+    return true;
+  });
   const labels = factLabels(facts);
 
   const tailorGenRow = latestGenByStep.get("tailor");

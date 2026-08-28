@@ -57,4 +57,40 @@ describe("latestGenerationByStep", () => {
 
     expect(latestGenerationByStep(rows, ["tailor"]).get("tailor")?.id).toBe("first");
   });
+
+  it("a newer failed/unparseable row does not shadow an older good one", () => {
+    interface UnusableRow extends Row {
+      usable: boolean;
+    }
+    const rows: UnusableRow[] = [
+      { ...row("tailor-good-old", "tailor", "2026-01-01T00:00:00Z"), usable: true },
+      { ...row("tailor-bad-new", "tailor", "2026-01-02T00:00:00Z"), usable: false },
+      { ...row("suggest-good", "suggest", "2026-01-01T00:00:00Z"), usable: true },
+    ];
+
+    const latest = latestGenerationByStep(rows, ["tailor", "suggest"], (r) => r.usable);
+
+    expect(latest.get("tailor")?.id).toBe("tailor-good-old");
+    expect(latest.get("suggest")?.id).toBe("suggest-good");
+  });
+
+  it("falls back to the newest row when nothing for that step passes isUsable", () => {
+    const rows = [
+      row("tailor-bad-old", "tailor", "2026-01-01T00:00:00Z"),
+      row("tailor-bad-new", "tailor", "2026-01-02T00:00:00Z"),
+    ];
+
+    const latest = latestGenerationByStep(rows, ["tailor"], () => false);
+
+    expect(latest.get("tailor")?.id).toBe("tailor-bad-new");
+  });
+
+  it("without isUsable, behaves exactly like picking the single newest row", () => {
+    const rows = [
+      row("tailor-old", "tailor", "2026-01-01T00:00:00Z"),
+      row("tailor-new", "tailor", "2026-01-02T00:00:00Z"),
+    ];
+
+    expect(latestGenerationByStep(rows, ["tailor"]).get("tailor")?.id).toBe("tailor-new");
+  });
 });
