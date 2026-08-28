@@ -84,6 +84,7 @@ export const atsVendorEnum = pgEnum("ats_vendor", [
   "personio",
   "smartrecruiters",
   "yc",
+  "workday",
   "other",
 ]);
 

@@ -3,7 +3,7 @@ import { FINDERS, FINDER_VENDORS, parseVendors, spreadAcrossVendors } from "../.
 import type { AtsVendor } from "../../src/finders/types";
 
 describe("finder registry", () => {
-  it("covers the seven vendors the spec names and nothing else", () => {
+  it("covers the eight vendors the spec names and nothing else", () => {
     expect(FINDER_VENDORS).toEqual([
       "ashby",
       "greenhouse",
@@ -11,9 +11,10 @@ describe("finder registry", () => {
       "personio",
       "recruitee",
       "smartrecruiters",
+      "workday",
       "yc",
     ]);
-    // `other` holds v1's Workday tenants as data; there is no Workday finder.
+    // `other` is rows with no ATS this repo can read; there is no finder for it.
     expect(FINDERS.other).toBeUndefined();
     for (const vendor of FINDER_VENDORS) {
       expect(FINDERS[vendor]!.vendor).toBe(vendor);
@@ -27,8 +28,12 @@ describe("parseVendors", () => {
     expect(parseVendors(undefined)).toBeUndefined();
   });
 
+  it("accepts workday alongside the other vendors", () => {
+    expect(parseVendors("greenhouse,workday")).toEqual(["greenhouse", "workday"]);
+  });
+
   it("rejects an unknown vendor by name", () => {
-    expect(() => parseVendors("greenhouse,workday")).toThrow(/workday/);
+    expect(() => parseVendors("greenhouse,bamboohr")).toThrow(/bamboohr/);
   });
 });
 

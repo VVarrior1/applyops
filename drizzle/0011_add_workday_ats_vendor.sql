@@ -1,0 +1,1 @@
+ALTER TYPE "public"."ats_vendor" ADD VALUE 'workday' BEFORE 'other';

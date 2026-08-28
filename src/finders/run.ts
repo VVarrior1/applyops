@@ -31,11 +31,15 @@ import { personioFinder } from "./personio";
 import { recruiteeFinder } from "./recruitee";
 import { smartrecruitersFinder } from "./smartrecruiters";
 import { VendorRequiresKeyError, type AtsVendor, type Finder, type RawJob } from "./types";
+import { workdayFinder } from "./workday";
 import { ycFinder } from "./yc";
 
 /**
- * Every vendor with a working public endpoint. `other` (v1's Workday tenants,
- * kept as data — spec §6) and companies with no slug are simply never asked.
+ * Every vendor with a working public endpoint. `other` (rows with no ATS this
+ * repo can read yet) and companies with no slug are simply never asked. Some
+ * of v1's original Workday tenants (`ats_vendor = 'other'`, kept as data —
+ * spec §6) are re-verified and re-seeded under `workday` by
+ * `workday-tenants.ts` / `applyops workday seed`; the rest are just dead data.
  */
 export const FINDERS: Partial<Record<AtsVendor, Finder>> = {
   ashby: ashbyFinder,
@@ -44,6 +48,7 @@ export const FINDERS: Partial<Record<AtsVendor, Finder>> = {
   personio: personioFinder,
   recruitee: recruiteeFinder,
   smartrecruiters: smartrecruitersFinder,
+  workday: workdayFinder,
   yc: ycFinder,
 };
 
