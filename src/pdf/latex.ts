@@ -681,7 +681,10 @@ ${items}
 `;
   }
 
-  const note = extractProjectsNote(region.body) ?? `\\vspace{4pt}\n  ${DEFAULT_PROJECTS_NOTE}`;
+  // Keep a closing note only if the base resume has one of its own. v1 always
+  // appended "Additional projects available at request…"; the owner asked for
+  // that to go (2026-08-28), so a base without a note gets none.
+  const note = extractProjectsNote(region.body) ?? "";
   block += `\n  ${note}\n`;
 
   return content.slice(0, region.start) + block + "\n" + content.slice(region.end);
