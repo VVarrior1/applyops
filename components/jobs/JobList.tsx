@@ -94,6 +94,7 @@ export function JobList({
   skippedCount,
   verdictFilter,
   total,
+  totalIsApprox,
   page,
   pageSize,
 }: {
@@ -103,7 +104,15 @@ export function JobList({
   verdictFilter: "worth" | "all";
   /** True COUNT(*) over the same SQL conditions as `jobs` — not the page size, see build spec item 2. */
   total: number;
-  /** 1-indexed current page. */
+  /**
+   * True when `total` may still include rows that get hidden client-side
+   * by `assessJob` (i.e. `verdictFilter === "worth"`) — those blockers
+   * aren't all cheap to express in SQL, so `total` is an upper bound in
+   * that case, not an exact count. Rendered as "~total" rather than a
+   * falsely precise number.
+   */
+  totalIsApprox: boolean;
+  /** 1-indexed current page — already clamped server-side to the last real page. */
   page: number;
   pageSize: number;
 }) {
@@ -134,8 +143,15 @@ export function JobList({
     return qs ? `/jobs?${qs}` : "/jobs";
   }
 
-  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
-  const to = Math.min(page * pageSize, total);
+  // `from` is this page's position in the *fetched* (LIMIT/OFFSET) result
+  // set; `to` is derived from `jobs.length` — the rows actually rendered
+  // after assessJob's per-row filtering — rather than assumed to equal a
+  // full `pageSize`, since a page can render fewer rows than it fetched
+  // (QA: "Showing 1–50 of 101" while only 35 rows render). When nothing on
+  // this page renders (e.g. every fetched row got hidden), both collapse
+  // to 0 rather than producing a reversed/negative range.
+  const from = total === 0 || jobs.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = jobs.length === 0 ? 0 : from + jobs.length - 1;
   const hasPrev = page > 1;
   const hasNext = page * pageSize < total;
 
@@ -169,7 +185,9 @@ export function JobList({
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          {total === 0 ? "Showing 0 of 0" : `Showing ${from}–${to} of ${total}`}
+          {total === 0
+            ? "Showing 0 of 0"
+            : `Showing ${from}–${to} of ${totalIsApprox ? "~" : ""}${total}`}
           {skippedCount > 0 && (
             <>
               {" "}
@@ -193,93 +211,95 @@ export function JobList({
       {status && <p className="text-sm text-muted-foreground">{status}</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Verdict</TableHead>
-            <TableHead>Score</TableHead>
-            <TableHead>Title</TableHead>
-            <TableHead>Company</TableHead>
-            <TableHead>Location</TableHead>
-            <TableHead>Work auth</TableHead>
-            <TableHead>Posted</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {jobs.length === 0 && (
+      <div className="overflow-x-auto rounded-lg border">
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground">
-                No jobs match these filters yet. Try “Rank more” or widen the filters.
-              </TableCell>
+              <TableHead>Verdict</TableHead>
+              <TableHead>Score</TableHead>
+              <TableHead>Title</TableHead>
+              <TableHead>Company</TableHead>
+              <TableHead>Location</TableHead>
+              <TableHead>Work auth</TableHead>
+              <TableHead>Posted</TableHead>
             </TableRow>
-          )}
-          {jobs.map((job) => (
-            <TableRow key={job.id}>
-              <TableCell title={job.reasons.join("\n")}>
-                <div className="flex flex-col gap-0.5">
-                  <VerdictBadge verdict={job.verdict} reasons={job.reasons} />
-                  {job.reasons[0] && (
-                    <span className="max-w-40 truncate text-[11px] text-muted-foreground">
-                      {job.reasons[0]}
-                    </span>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell>
-                {job.score === null ? (
-                  <span className="text-muted-foreground">—</span>
-                ) : (
-                  <span className="font-medium">
-                    {job.score}
-                    {job.scoreKind === "keyword" && (
-                      <span className="ml-1 text-xs font-normal text-muted-foreground">kw</span>
+          </TableHeader>
+          <TableBody>
+            {jobs.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                  No jobs match these filters yet. Try “Rank more” or widen the filters.
+                </TableCell>
+              </TableRow>
+            )}
+            {jobs.map((job) => (
+              <TableRow key={job.id}>
+                <TableCell title={job.reasons.join("\n")}>
+                  <div className="flex flex-col gap-0.5">
+                    <VerdictBadge verdict={job.verdict} reasons={job.reasons} />
+                    {job.reasons[0] && (
+                      <span className="max-w-40 truncate text-[11px] text-muted-foreground">
+                        {job.reasons[0]}
+                      </span>
                     )}
-                  </span>
-                )}
-              </TableCell>
-              <TableCell className="max-w-72 truncate whitespace-normal">
-                <Link href={`/jobs/${job.id}`} className="font-medium hover:underline">
-                  {job.title}
-                </Link>
-              </TableCell>
-              <TableCell>{job.companyName ?? "—"}</TableCell>
-              <TableCell className="max-w-48 truncate text-muted-foreground">
-                <span className="inline-flex items-center gap-1.5">
-                  {job.location ?? (job.remote ? "Remote" : "—")}
-                  {job.countries.length > 0 && (
-                    <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
-                      {job.countries.join(", ")}
-                    </Badge>
-                  )}
-                </span>
-              </TableCell>
-              <TableCell>
-                {job.workAuthSignal && WORK_AUTH_LABEL[job.workAuthSignal] ? (
-                  <Badge variant="outline">{WORK_AUTH_LABEL[job.workAuthSignal]}</Badge>
-                ) : (
-                  <span className="text-muted-foreground">—</span>
-                )}
-              </TableCell>
-              <TableCell className="text-muted-foreground">
-                {(() => {
-                  const age = formatPostedAge(job.postedAt);
-                  if (!age) return "—";
-                  return (
-                    <span title={age.absolute} className="inline-flex items-center gap-1.5">
-                      {age.relative}
-                      {age.isNew && (
-                        <Badge className="border-emerald-500/20 bg-emerald-500/15 text-[10px] text-emerald-700 dark:text-emerald-400">
-                          New
-                        </Badge>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  {job.score === null ? (
+                    <span className="text-muted-foreground">—</span>
+                  ) : (
+                    <span className="font-medium">
+                      {job.score}
+                      {job.scoreKind === "keyword" && (
+                        <span className="ml-1 text-xs font-normal text-muted-foreground">kw</span>
                       )}
                     </span>
-                  );
-                })()}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+                  )}
+                </TableCell>
+                <TableCell className="max-w-72 truncate whitespace-normal">
+                  <Link href={`/jobs/${job.id}`} className="font-medium hover:underline">
+                    {job.title}
+                  </Link>
+                </TableCell>
+                <TableCell>{job.companyName ?? "—"}</TableCell>
+                <TableCell className="max-w-48 truncate text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5">
+                    {job.location ?? (job.remote ? "Remote" : "—")}
+                    {job.countries.length > 0 && (
+                      <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
+                        {job.countries.join(", ")}
+                      </Badge>
+                    )}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  {job.workAuthSignal && WORK_AUTH_LABEL[job.workAuthSignal] ? (
+                    <Badge variant="outline">{WORK_AUTH_LABEL[job.workAuthSignal]}</Badge>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {(() => {
+                    const age = formatPostedAge(job.postedAt);
+                    if (!age) return "—";
+                    return (
+                      <span title={age.absolute} className="inline-flex items-center gap-1.5">
+                        {age.relative}
+                        {age.isNew && (
+                          <Badge className="border-emerald-500/20 bg-emerald-500/15 text-[10px] text-emerald-700 dark:text-emerald-400">
+                            New
+                          </Badge>
+                        )}
+                      </span>
+                    );
+                  })()}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
 
       <div className="flex items-center justify-between gap-2">
         <Link
