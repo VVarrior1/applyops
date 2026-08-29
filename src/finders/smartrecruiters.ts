@@ -5,9 +5,15 @@
  * description has to come from `/postings/{id}` (`jobAd.sections`). That is an
  * extra request per posting, and SmartRecruiters boards are dominated by
  * non-engineering roles, so details are fetched only for titles that survive
- * `isRelevantRole` and only up to `MAX_DETAIL_FETCHES` per company; everything
- * else keeps a description synthesised from the structured list fields. A
- * posting is never dropped for want of a detail fetch.
+ * `isRelevantRole`; everything else keeps a description synthesised from the
+ * structured list fields. A posting is never dropped for want of a detail
+ * fetch.
+ *
+ * That used to be capped at 40 detail fetches per company as well. The cap is
+ * gone (Aug 2026) for the reason spelled out in `workday.ts`'s header: a
+ * posting stored as nothing but its own title reads as entry-level to
+ * `isEntryLevel` no matter what the real ad says. The ≥120 ms inter-request
+ * delay is what keeps this polite; the count never was.
  *
  * Some tenants have the public API disabled entirely — that shows up as
  * 401/403 on the *listing* call and is reported as `VendorRequiresKeyError`
@@ -20,7 +26,6 @@ import { VendorRequiresKeyError, type Finder, type RawJob } from "./types";
 
 const PAGE_SIZE = 100;
 const MAX_PAGES = 5;
-const MAX_DETAIL_FETCHES = 40;
 const DETAIL_DELAY_MS = 120;
 
 type SrPosting = {
@@ -80,6 +85,34 @@ async function listPostings(slug: string): Promise<SrPosting[]> {
   return all;
 }
 
+/**
+ * The `jobAd.sections` → plain-text join that {@link fetchSmartRecruitersJobs}
+ * uses, pulled out so `applyops jobs backfill-descriptions` produces byte-for
+ * -byte the same body text as a fresh scrape would.
+ */
+function detailBody(detail: SrDetail | null): string {
+  const sections = detail?.jobAd?.sections ?? {};
+  return ["jobDescription", "qualifications", "additionalInformation", "companyDescription"]
+    .map((key) => stripHtml(sections[key]?.text))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/**
+ * Re-fetches ONE posting's body, for `applyops jobs backfill-descriptions` —
+ * the repair path for rows the old `MAX_DETAIL_FETCHES` cap left holding
+ * nothing but their title. Both arguments come straight off the DB row
+ * (`companies.ats_slug` and `jobs.external_id`). Returns null when the
+ * posting is gone or carries no ad body.
+ */
+export async function fetchSmartRecruitersDescription(
+  slug: string,
+  id: string,
+): Promise<string | null> {
+  const detail = await fetchJsonOrNull<SrDetail>(smartrecruitersDetailUrl(slug, id));
+  return detailBody(detail) || null;
+}
+
 export async function fetchSmartRecruitersJobs(slug: string): Promise<RawJob[]> {
   const postings = await listPostings(slug);
   if (postings.length === 0) return [];
@@ -99,7 +132,7 @@ export async function fetchSmartRecruitersJobs(slug: string): Promise<RawJob[]> 
       null;
 
     let detail: SrDetail | null = null;
-    if (detailFetches < MAX_DETAIL_FETCHES && isRelevantRole(title)) {
+    if (isRelevantRole(title)) {
       detailFetches++;
       if (detailFetches > 1) await sleep(DETAIL_DELAY_MS);
       try {
@@ -110,11 +143,7 @@ export async function fetchSmartRecruitersJobs(slug: string): Promise<RawJob[]> 
       }
     }
 
-    const sections = detail?.jobAd?.sections ?? {};
-    const body = ["jobDescription", "qualifications", "additionalInformation", "companyDescription"]
-      .map((key) => stripHtml(sections[key]?.text))
-      .filter(Boolean)
-      .join("\n\n");
+    const body = detailBody(detail);
 
     jobs.push({
       externalId: id,

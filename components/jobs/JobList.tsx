@@ -15,7 +15,7 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import { VerdictBadge } from "@/components/jobs/VerdictBadge";
-import type { Verdict } from "@/src/rank/verdict";
+import { ENTRY_LEVEL_UNKNOWN_REASON, type Verdict } from "@/src/rank/verdict";
 
 export interface JobListItem {
   id: string;
@@ -34,6 +34,15 @@ export interface JobListItem {
   verdict: Verdict;
   /** Hard blockers first, then soft caveats — see src/rank/verdict.ts. */
   reasons: string[];
+  /**
+   * `jobs.is_entry_level IS NULL` — the posting body was never fetched and
+   * the title gave nothing away, so nobody (not the finder, not the ranker)
+   * has actually read this posting's experience requirement. Rendered as an
+   * "Unverified" badge so the row is never mistaken for a confirmed
+   * entry-level match; the matching verdict caveat is
+   * ENTRY_LEVEL_UNKNOWN_REASON (src/rank/verdict.ts).
+   */
+  entryLevelUnknown: boolean;
 }
 
 const WORK_AUTH_LABEL: Record<string, string> = {
@@ -260,6 +269,15 @@ export function JobList({
                   <Link href={`/jobs/${job.id}`} className="font-medium hover:underline">
                     {job.title}
                   </Link>
+                  {job.entryLevelUnknown && (
+                    <Badge
+                      variant="outline"
+                      className="ml-1.5 border-amber-500/30 bg-amber-500/10 align-middle text-[10px] font-normal text-amber-700 dark:text-amber-400"
+                      title={ENTRY_LEVEL_UNKNOWN_REASON}
+                    >
+                      Unverified
+                    </Badge>
+                  )}
                 </TableCell>
                 <TableCell>{job.companyName ?? "—"}</TableCell>
                 <TableCell className="max-w-48 truncate text-muted-foreground">

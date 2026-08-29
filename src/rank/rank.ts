@@ -33,7 +33,7 @@ import type { ModelId } from "../llm/model-id";
 import { runAnalyze, runFit } from "../pipeline/steps";
 import type { AnalyzeOutput, Fact, FitOutput } from "../pipeline/schemas";
 import { getConfirmedFacts, getPrefs, type SearchPrefsRow } from "../profile/facts";
-import { candidateConditions } from "./candidates";
+import { candidateConditions, entryLevelCondition } from "./candidates";
 import { keywordScore } from "./keyword";
 import { roleTitlePatternSource } from "./role-titles";
 import { FIT_HARD_PREFERENCE_CAP, hardPreferenceConflict } from "./verdict";
@@ -183,7 +183,9 @@ async function selectCandidateJobs(
     .where(
       and(
         eq(jobs.active, true),
-        eq(jobs.isEntryLevel, true),
+        // `= true` only — an unknown (NULL) entry-level flag never gets paid
+        // ranking budget spent on it. See entryLevelCondition's doc comment.
+        entryLevelCondition(),
         eq(jobs.isRelevantRole, true),
         isNull(jobScores.id),
         ...(rolePattern ? [sql`${jobs.title} ~* ${rolePattern}`] : []),

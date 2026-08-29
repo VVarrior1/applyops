@@ -9,6 +9,7 @@ import { DEFAULT_MODEL_BY_STEP } from "@/src/llm/defaults";
 import type { SearchPrefsRow } from "@/src/profile/facts";
 import { getPrefs } from "@/src/profile/facts";
 import { appliedJobIds as deriveAppliedJobIds, countryOverlapCondition, countryUnknownCondition, lacksUsAuth } from "@/src/rank/candidates";
+import { levelCondition, parseLevel, parseSort, SORT_LABELS, sortOrder } from "@/src/rank/job-query";
 import { fitRankerVersion, KEYWORD_RANKER_VERSION } from "@/src/rank/rank";
 import { roleTitlePatternSource } from "@/src/rank/role-titles";
 import { assessJob, type VerdictInput } from "@/src/rank/verdict";
@@ -118,9 +119,13 @@ function toVerdictPrefs(prefs: SearchPrefsRow | null): VerdictPrefs | null {
  * plus later additions: a posted-date window, a true COUNT + `page`-based
  * pagination, a title/company search box, and a role-family filter.
  *
- * Restricted to `active ∧ is_entry_level ∧ is_relevant_role`, same as
- * `rankForUser`'s candidate pool (`src/rank/rank.ts`) — this page is "your
- * matches", not a firehose of all ~42k scraped postings (Task 7's notes).
+ * Restricted to `active ∧ is_relevant_role`, plus whatever the `level` param
+ * asks of the three-valued `is_entry_level` column. Its default (`= true`
+ * only) is exactly `rankForUser`'s candidate pool (`src/rank/rank.ts`) — this
+ * page is "your matches", not a firehose of all ~42k scraped postings (Task
+ * 7's notes) — and `level=unknown` widens it to the postings whose body no
+ * finder ever fetched, each flagged as such rather than silently counted as a
+ * match.
  * Score shown is `COALESCE(fit-v1 score, keyword-v1 score)`, but the two
  * scales differ (0–100 vs 0–10) and this build's live data has fit scores
  * as low as 0 and keyword scores as high as 9, so a naive
@@ -164,6 +169,8 @@ export default async function JobsPage({
     posted?: string;
     q?: string;
     roles?: string;
+    level?: string;
+    sort?: string;
     page?: string;
   }>;
 }) {
@@ -199,6 +206,8 @@ export default async function JobsPage({
     posted: parsePosted(sp.posted),
     q: parseQ(sp.q),
     roles: parseRoles(sp.roles, userRoles.length > 0),
+    level: parseLevel(sp.level),
+    sort: parseSort(sp.sort),
   };
   const page = parsePage(sp.page);
 
@@ -206,11 +215,12 @@ export default async function JobsPage({
   const fitScores = alias(jobScores, "fit_scores");
   const kwScores = alias(jobScores, "kw_scores");
 
-  const conditions: SQL[] = [
-    eq(jobs.active, true),
-    eq(jobs.isEntryLevel, true),
-    eq(jobs.isRelevantRole, true),
-  ];
+  const conditions: SQL[] = [eq(jobs.active, true), eq(jobs.isRelevantRole, true)];
+  // Three-valued entry-level (src/finders/filters.ts → classifyEntryLevel):
+  // `entry` (the default) is `= true` only, so the unknown pile no longer
+  // masquerades as confirmed matches.
+  const level = levelCondition(filters.level);
+  if (level) conditions.push(level);
   if (filters.remote === "remote") conditions.push(eq(jobs.remote, true));
   if (filters.remote === "onsite") conditions.push(eq(jobs.remote, false));
   if (filters.workAuth !== "any") {
@@ -318,13 +328,14 @@ export default async function JobsPage({
       ),
     )
     .where(and(...conditions))
+    // `sort` (default "fit"): see sortOrder's doc comment — in particular why
+    // "fit" is three terms and not a single `coalesce(...) DESC`.
     .orderBy(
-      // Every fit-scored row (any fit score, including 0) ahead of every
-      // keyword-only row, as a block — the two scales are not comparable
-      // directly (see the file header).
-      sql`(${fitScores.score} IS NOT NULL) DESC`,
-      sql`coalesce(${fitScores.score}, ${kwScores.score}) DESC NULLS LAST`,
-      sql`${jobs.postedAt} DESC NULLS LAST`,
+      ...sortOrder(filters.sort, {
+        fitScore: fitScores.score,
+        keywordScore: kwScores.score,
+        companyName: companies.name,
+      }),
     )
     .limit(PAGE_SIZE)
     .offset((effectivePage - 1) * PAGE_SIZE);
@@ -363,6 +374,7 @@ export default async function JobsPage({
       countries: row.countries ?? [],
       verdict,
       reasons,
+      entryLevelUnknown: row.isEntryLevel === null,
     };
   });
 
@@ -374,8 +386,14 @@ export default async function JobsPage({
       <div>
         <h1 className="text-xl font-semibold">Jobs</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Active, entry-level, relevant postings — sorted by your fit score, falling back to the
-          free keyword baseline for anything not yet scored.
+          {filters.level === "entry"
+            ? "Active, confirmed entry-level, relevant postings"
+            : filters.level === "unknown"
+              ? "Active, relevant postings — including ones whose experience requirement we haven't read yet"
+              : "Active, relevant postings at every level"}
+          {filters.sort === "fit"
+            ? " — sorted by your fit score, falling back to the free keyword baseline for anything not yet scored."
+            : ` — sorted by ${SORT_LABELS[filters.sort].toLowerCase()}.`}
         </p>
       </div>
 

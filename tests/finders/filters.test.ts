@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyEntryLevel,
   detectWorkAuth,
+  hasUsableDescription,
   isEntryLevel,
   isPreferredLocation,
   isRelevantRole,
   normalizeLocation,
+  titleEntrySignal,
 } from "../../src/finders/filters";
 
 describe("isEntryLevel", () => {
@@ -290,5 +293,136 @@ describe("isEntryLevel judges year ranges by their lower bound", () => {
     expect(isEntryLevel("Software Developer", "2 to 5 years of relevant engineering experience")).toBe(false);
     expect(isEntryLevel("GenAI Software Developer", "4-6 years of experience in software dev")).toBe(false);
     expect(isEntryLevel("Software Developer", "1-3 years preferred; 5+ years for senior track")).toBe(false);
+  });
+});
+
+describe("isEntryLevel reads years-of-experience written as number words", () => {
+  const pad = " ".concat("Build great things with a great team. ".repeat(8));
+
+  it.each([
+    ["five years", "We require five years of professional experience building systems."],
+    ["minimum of five (5) years", "Minimum of five (5) years of relevant experience."],
+    ["at least three years", "At least three years of experience in a similar role."],
+    ["five or more years", "Five or more years of experience is required."],
+    ["five+ years", "five+ years of Java."],
+    ["ten years", "Ten years of relevant professional background."],
+    ["at least 5 full years", "You have at least 5 full years of hands-on experience."],
+    ["5 or more years", "5 or more years of experience required."],
+    ["5+ yrs", "5+ yrs preferred for this position."],
+  ])("rejects %s", (_label, description) => {
+    expect(isEntryLevel("Software Engineer", description + pad)).toBe(false);
+  });
+
+  it.each([
+    ["one to three years", "We want one to three years of experience with TypeScript."],
+    ["1-3 years", "1-3 years of experience with TypeScript."],
+    ["two years", "Two years of experience is plenty for this role."],
+    ["2+ yrs", "2+ yrs preferred for this position."],
+  ])("keeps %s", (_label, description) => {
+    expect(isEntryLevel("Software Engineer", description + pad)).toBe(true);
+  });
+
+  it("does not read a recruiting flourish as a requirement (real posting, Aug 2026)", () => {
+    // "Associate Product Engineer (College Grad 2027)" — the only "three
+    // years" in the body is a comparison, not an ask.
+    const body =
+      "We give you real problems that matter. You'll grow faster here in one year " +
+      "than you would in three years at a big tech company. It will be hard." + pad;
+    expect(isEntryLevel("Associate Product Engineer (College Grad 2027)", body)).toBe(true);
+  });
+
+  it("still rejects the real postings that DO state the ask in words (Aug 2026)", () => {
+    expect(
+      isEntryLevel(
+        "Detection Engineer, Information Security",
+        "You have a degree in Computer Science. You have at least five years of " +
+          "experience as an Information Security Consultant or similar." + pad,
+      ),
+    ).toBe(false);
+    expect(
+      isEntryLevel(
+        "Quality Engineer",
+        "The ideal candidate will have five years of related experience and/or " +
+          "training; or equivalent combination." + pad,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("hasUsableDescription", () => {
+  it("rejects null, empty, too-short, and title-only descriptions", () => {
+    expect(hasUsableDescription(null, "Software Engineer")).toBe(false);
+    expect(hasUsableDescription("", "Software Engineer")).toBe(false);
+    expect(hasUsableDescription("   ", "Software Engineer")).toBe(false);
+    // The exact placeholder the capped Workday/SmartRecruiters finders stored.
+    expect(hasUsableDescription("Software Engineer", "Software Engineer")).toBe(false);
+    expect(hasUsableDescription("x".repeat(199), "Software Engineer")).toBe(false);
+  });
+
+  it("accepts a real posting body", () => {
+    expect(hasUsableDescription("x".repeat(200), "Software Engineer")).toBe(true);
+  });
+
+  it("rejects a long description that is only the title repeated back", () => {
+    const longTitle = "Software Engineer ".repeat(20).trim();
+    expect(hasUsableDescription(longTitle, longTitle)).toBe(false);
+  });
+});
+
+describe("titleEntrySignal", () => {
+  it.each([
+    "Junior Platform Developer",
+    "Software Engineer, New Grad 2026",
+    "Graduate Software Engineer",
+    "Software Engineer Intern (Summer)",
+    "Software Developer Co-op",
+    "Associate Software Developer",
+    "Entry-Level Backend Engineer",
+    "Software Engineer I",
+    "Developer 1, Platform",
+    "Software Engineer, Level 1",
+  ])("%s → true", (title) => {
+    expect(titleEntrySignal(title)).toBe(true);
+  });
+
+  it.each([
+    "Software Engineer",
+    "Software Engineer II",
+    "Senior Software Engineer",
+    "Staff Backend Engineer",
+  ])("%s → false", (title) => {
+    expect(titleEntrySignal(title)).toBe(false);
+  });
+});
+
+describe("classifyEntryLevel", () => {
+  const body = (text: string) => text + " ".concat("More about the role. ".repeat(15));
+
+  it("is null when the description was never fetched and the title says nothing", () => {
+    // The exact shape of the 48 title-only rows this fix was written for.
+    expect(classifyEntryLevel("Software Engineer", "Software Engineer")).toBeNull();
+    expect(classifyEntryLevel("Software Engineer", null)).toBeNull();
+    expect(classifyEntryLevel("Machine Learning Engineer", "")).toBeNull();
+  });
+
+  it("is true from the title alone when the title carries an entry signal", () => {
+    expect(classifyEntryLevel("Software Engineer Intern", null)).toBe(true);
+    expect(classifyEntryLevel("Junior Platform Developer", "Junior Platform Developer")).toBe(true);
+    expect(classifyEntryLevel("Software Engineer I", null)).toBe(true);
+  });
+
+  it("is false from the title alone when the title is disqualifying", () => {
+    expect(classifyEntryLevel("Senior Software Engineer", null)).toBe(false);
+    expect(classifyEntryLevel("Staff Software Engineer", "Staff Software Engineer")).toBe(false);
+    expect(classifyEntryLevel("Software Engineer II", null)).toBe(false);
+    // Seniority beats the entry-level word "associate".
+    expect(classifyEntryLevel("Associate Director, Engineering", null)).toBe(false);
+  });
+
+  it("defers to isEntryLevel once there is a real description", () => {
+    expect(
+      classifyEntryLevel("Software Engineer", body("We require five years of professional experience.")),
+    ).toBe(false);
+    expect(classifyEntryLevel("Software Engineer", body("Build things with us."))).toBe(true);
   });
 });

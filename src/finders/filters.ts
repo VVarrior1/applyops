@@ -58,11 +58,48 @@ const SENIORITY_TITLE = [
 ];
 
 /**
- * "3+ years", "5 yrs", "4-6 years", "10 years" — anything at or above three
- * years. Two-or-fewer-years mentions are left alone on purpose: "0-2 years"
- * and "1-2 years" are entry-level phrasing.
+ * Spelled-out counts → digits, so one regex family covers both "5 years" and
+ * "five years". Postings write the requirement either way ("a minimum of five
+ * (5) years"), and before this, half of them read as entry level.
+ *
+ * Applied only to the copy of the text used for the years checks
+ * ({@link yearsText}) — never to the copy the entry-level/senior-context
+ * signals read — so turning the very common word "one" into "1" cannot
+ * change any other verdict.
  */
-const YEARS_AT_LEAST_THREE = /\b(?:[3-9]|[1-9]\d)\s*\+?\s*(?:years?|yrs?)\b/;
+const NUMBER_WORDS: Record<string, string> = {
+  zero: "0",
+  one: "1",
+  two: "2",
+  three: "3",
+  four: "4",
+  five: "5",
+  six: "6",
+  seven: "7",
+  eight: "8",
+  nine: "9",
+  ten: "10",
+};
+const NUMBER_WORD_RE = new RegExp(`\\b(${Object.keys(NUMBER_WORDS).join("|")})\\b`, "g");
+
+/**
+ * "3+ years", "5 yrs", "4-6 years", "10 years", "five years", "five+ years",
+ * "minimum of 5 years", "5 or more years", "at least five years", "5+ yrs" —
+ * anything at or above three years. Two-or-fewer-years mentions are left
+ * alone on purpose: "0-2 years" and "1-2 years" are entry-level phrasing.
+ *
+ * The optional "or more"/"plus" clause is what catches "3 or more years",
+ * which the bare `3\s*\+?\s*years` shape misses; the "at least"/"minimum of"
+ * lead-ins are already covered because the number still sits before the unit
+ * ("minimum of 5 years" contains "5 years"), and {@link YEARS_LEAD_IN} picks
+ * up the looser variants that put a word in between ("at least 5 full years").
+ */
+const YEARS_AT_LEAST_THREE =
+  /\b(?:[3-9]|[1-9]\d)\s*\+?\s*(?:(?:or (?:more|greater|above)|plus)\s+)?(?:years?|yrs?)\b/;
+
+/** "at least 5 full years", "a minimum of four relevant years". */
+const YEARS_LEAD_IN =
+  /\b(?:at least|minimum(?:\s+of)?|min\.?(?:\s+of)?|no less than|not less than|over|more than)\s+(?:[3-9]|[1-9]\d)\s*\+?\s*(?:[a-z]+\s+){0,2}(?:years?|yrs?)\b/;
 /** Any years-of-experience mention at all (the strict late-stage check). */
 const ANY_YEARS = /\b\d+\s*\+?\s*(?:years?|yrs?)\b/;
 const ADVANCED_DEGREE = /\b(?:ph\.?\s?d|doctorate|postdoc)\b/;
@@ -141,8 +178,7 @@ export function isEntryLevel(title: string, description: string): boolean {
   // Ranges are judged by their LOWER bound: "1-3 years" / "0 to 2 years" are
   // new-grad territory even though "3 years" appears in the text. Ranges whose
   // lower bound is ≤1 are stripped before the ≥3-years check runs.
-  const textForYears = text.replace(/\b[01]\s*(?:-|–|to)\s*\d{1,2}\s*\+?\s*(?:years?|yrs?)\b/g, " ");
-  if (YEARS_AT_LEAST_THREE.test(textForYears)) return false;
+  if (wantsThreePlusYears(text)) return false;
   if (ADVANCED_DEGREE.test(text)) return false;
   if (SENIOR_CONTEXT.some((re) => re.test(text))) return false;
 
@@ -158,6 +194,179 @@ export function isEntryLevel(title: string, description: string): boolean {
   void ANY_YEARS;
   void EXACT_GENERIC_TITLES;
   return true;
+}
+
+/**
+ * The text the years-of-experience checks run against: year *ranges* whose
+ * lower bound is 0 or 1 removed entirely, optionally after resolving spelled
+ * -out counts to digits.
+ *
+ * The range strip is what makes ranges judged by their LOWER bound: "1-3
+ * years" and "one to three years" are new-grad asks even though "3 years"
+ * appears in the text, while "3-5 years" keeps its "5 years" and is rejected.
+ * A parenthesised restatement of the same count ("five (5) years") is folded
+ * away in between, so it cannot split the count from its unit.
+ */
+function yearsText(text: string, spellOut: boolean): string {
+  const withDigits = spellOut ? text.replace(NUMBER_WORD_RE, (m) => NUMBER_WORDS[m]) : text;
+  return withDigits
+    // "five (5) years" — after the word→digit pass that reads "5 (5) years",
+    // and the parenthetical would otherwise sit between the count and the
+    // unit and defeat every pattern below. Boilerplate-common in ATS text.
+    .replace(/(\d)\s*\(\s*\d+\s*\)/g, "$1")
+    .replace(/\b[01]\s*(?:-|–|—|to)\s*\d{1,2}\s*\+?\s*(?:years?|yrs?)\b/g, " ");
+}
+
+/**
+ * Words that make a nearby "N years" an actual *requirement* rather than
+ * prose. Only spelled-out counts are held to this (see
+ * {@link wantsThreePlusYears}).
+ */
+const YEARS_REQUIREMENT_CONTEXT =
+  /\b(?:experience|exp|background|professional|industry|hands[- ]?on|track record|expertise|relevant|related|minimum|min|at least|required?|requires|requirement|qualifications?|working|worked|practice|practicing|proven|equivalent|prior)\b/;
+
+/**
+ * True when the text demands three or more years of experience.
+ *
+ * Digits and spelled-out counts are held to deliberately different bars:
+ *
+ * - **Digits** ("5+ years", "4-6 years") are matched anywhere. A posting that
+ *   prints a number next to "years" is nearly always stating a requirement.
+ * - **Number words** ("five years") must sit within 60 characters of a
+ *   requirement word. Spelled-out counts show up in ordinary prose far more
+ *   often than digits do, and two of the owner's real postings proved it:
+ *   "Associate Product Engineer (College Grad 2027)" reads "you'll grow
+ *   faster here in one year than you would in three years at a big tech
+ *   company" — a recruiting flourish, not an ask. Requiring the context word
+ *   keeps "at least five years of experience" (a real ask, same corpus)
+ *   rejected while leaving those two alone. An explicitly open-ended spelled
+ *   -out count ("five+ years", "five or more years") skips the context test:
+ *   prose does not write that.
+ */
+function wantsThreePlusYears(text: string): boolean {
+  const digits = yearsText(text, false);
+  if (YEARS_AT_LEAST_THREE.test(digits) || YEARS_LEAD_IN.test(digits)) return true;
+
+  const spelled = yearsText(text, true);
+  for (const re of [YEARS_AT_LEAST_THREE, YEARS_LEAD_IN]) {
+    const global = new RegExp(re.source, "g");
+    for (const m of spelled.matchAll(global)) {
+      const start = m.index ?? 0;
+      // "three+ years" / "five or more years": nobody writes that in prose —
+      // an explicit open-ended count IS the requirement, context or not.
+      if (/\+|or more|or greater|or above|plus/.test(m[0])) return true;
+      const before = spelled.slice(Math.max(0, start - 60), start);
+      const after = spelled.slice(start + m[0].length, start + m[0].length + 60);
+      if (YEARS_REQUIREMENT_CONTEXT.test(before) || YEARS_REQUIREMENT_CONTEXT.test(after)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Unknown vs. false: descriptions the finders never fetched
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimum length for a description to count as a real posting body. Measured
+ * against the live corpus: the finders' *synthesised* fallbacks (the title
+ * alone, or a title plus two "Department: …" lines) all land well under this,
+ * while the shortest genuine posting bodies are several hundred characters.
+ */
+export const MIN_USABLE_DESCRIPTION_CHARS = 200;
+
+/**
+ * True when `description` is an actual posting body rather than the
+ * placeholder a finder stores when it never fetched the detail endpoint.
+ *
+ * This exists because of a real miss (Aug 2026): Workday and SmartRecruiters
+ * capped their per-company detail fetches, so 48 of the owner's 139 visible
+ * "entry level" postings had nothing but their title stored — and with no
+ * text to read, `isEntryLevel` fell through to its permissive default and
+ * called every one of them entry level. Several were "5+ years" roles.
+ */
+export function hasUsableDescription(description: string | null, title: string): boolean {
+  const text = (description ?? "").trim();
+  if (!text) return false;
+  if (text.length < MIN_USABLE_DESCRIPTION_CHARS) return false;
+  if (text.toLowerCase() === (title ?? "").trim().toLowerCase()) return false;
+  return true;
+}
+
+/**
+ * Entry-level evidence carried by the *title alone* — enough to call a
+ * posting entry level even with no description at all, since no amount of
+ * missing body text makes "Software Engineer Intern" a senior role.
+ *
+ * "Engineer I" / "Level 1" are the numbered-ladder bottom rung. The `i`
+ * alternative cannot match "engineer ii": `\b` requires a non-word character
+ * after the `i`, and there is none between the two `i`s.
+ */
+const TITLE_ENTRY_SIGNALS = [
+  /\bjunior\b/,
+  /\bjr\.?\b/,
+  /\bnew\s?grad(?:uate)?s?\b/,
+  /\bgrad(?:uate)?\b/,
+  /\bintern(?:ship)?s?\b/,
+  /\bco-?op\b/,
+  /\bassociate\b/,
+  /\bentry[- ]level\b/,
+  /\bearly[- ]career\b/,
+  /\bapprentice(?:ship)?\b/,
+  /\bcampus\b/,
+  /\b(?:engineer|developer|programmer|analyst|scientist)\s+(?:i|1)\b/,
+  /\blevel\s*(?:1|i)\b/,
+];
+
+/** See {@link TITLE_ENTRY_SIGNALS}. */
+export function titleEntrySignal(title: string): boolean {
+  const titleLower = (title ?? "").toLowerCase().trim();
+  if (!titleLower) return false;
+  return TITLE_ENTRY_SIGNALS.some((re) => re.test(titleLower));
+}
+
+/**
+ * Three-valued entry-level verdict — `true` / `false` / `null` ("unknown").
+ *
+ * `isEntryLevel` has to answer yes-or-no, and its default for text it cannot
+ * read is `true` (deliberately: see its own comment — requiring explicit
+ * "new grad" wording threw away ~90% of real Canadian postings). That default
+ * is right when there IS a description and it simply says nothing about
+ * seniority; it is wrong when there is no description at all, because then
+ * "no seniority evidence" means "we never looked", not "we looked and found
+ * none". This function is the one that tells those two cases apart, and it is
+ * what `runFinders`, `jobs backfill-flags` and the ranker store.
+ *
+ *   - description usable → `isEntryLevel`'s verdict, unchanged.
+ *   - no usable description and a title that is itself disqualifying
+ *     (senior/staff/lead/manager/…) → `false`. That is a real "no", not an
+ *     unknown; the missing body cannot rehabilitate "Senior Software
+ *     Engineer", and it is checked first so "Associate Director" reads as
+ *     senior rather than as the entry-level word "associate".
+ *   - no usable description, but the title says junior/intern/new grad/… →
+ *     `true`. The title alone is sufficient evidence.
+ *   - otherwise → `null`. The posting is not hidden — `/jobs` can still show
+ *     it under `level=unknown`, and the verdict carries a soft "check the
+ *     experience requirement on the posting" caveat — but it no longer
+ *     masquerades as a confirmed entry-level match.
+ */
+export function classifyEntryLevel(
+  title: string,
+  description: string | null,
+): boolean | null {
+  if (hasUsableDescription(description, title)) {
+    return isEntryLevel(title, description ?? "");
+  }
+  // Re-run the yes/no filter against the title alone FIRST: everything it can
+  // still reject there (title seniority, "10 years" in the title itself) is a
+  // fact about the title, not something the missing description could change
+  // — and a title carrying both signals ("Associate Director, Engineering",
+  // "Senior Engineer, Intern Mentor") is senior, not entry.
+  if (!isEntryLevel(title, "")) return false;
+  if (titleEntrySignal(title)) return true;
+  return null;
 }
 
 /** "Software Engineer, New Grad (Remote)" → "software engineer, new grad". */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { countsAsApplied } from "../../src/rank/candidates";
-import { assessJob, hardPreferenceConflict, type VerdictInput } from "../../src/rank/verdict";
+import { assessJob, ENTRY_LEVEL_UNKNOWN_REASON, hardPreferenceConflict, type VerdictInput } from "../../src/rank/verdict";
 
 const NOW = new Date("2026-08-28T12:00:00Z");
 const base: VerdictInput = {
@@ -75,6 +75,25 @@ describe("assessJob", () => {
     const v = assessJob({ ...base, job: { ...base.job, remote: false, location: "Toronto, ON", countries: ["CA"] } });
     expect(v.verdict).toBe("maybe");
     expect(v.reasons.join(" ")).toMatch(/onsite/i);
+  });
+
+  it("treats an unknown entry-level flag as a caveat, never a blocker", () => {
+    const v = assessJob({ ...base, job: { ...base.job, isEntryLevel: null } });
+    expect(v.verdict).toBe("maybe");
+    expect(v.reasons).toContain(ENTRY_LEVEL_UNKNOWN_REASON);
+  });
+
+  it("still hard-blocks a confirmed non-entry-level posting", () => {
+    const v = assessJob({ ...base, job: { ...base.job, isEntryLevel: false } });
+    expect(v.verdict).toBe("skip");
+    expect(v.reasons.join(" ")).toMatch(/Not an entry-level posting/);
+  });
+
+  it("does not add the unknown caveat when the flag is a real true/false", () => {
+    expect(assessJob(base).reasons).not.toContain(ENTRY_LEVEL_UNKNOWN_REASON);
+    expect(
+      assessJob({ ...base, job: { ...base.job, isEntryLevel: false } }).reasons,
+    ).not.toContain(ENTRY_LEVEL_UNKNOWN_REASON);
   });
 
   it("skips jobs already applied to", () => {

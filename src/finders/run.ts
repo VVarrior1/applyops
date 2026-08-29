@@ -16,13 +16,15 @@
  * The filters are *recorded*, not applied: `is_entry_level`,
  * `is_relevant_role` and `work_auth_signal` are stored on the row so ranking
  * (Task 8) can weigh them and a bad heuristic costs signal instead of silently
- * losing jobs.
+ * losing jobs. `is_entry_level` is three-valued — see `classifyEntryLevel`
+ * in ./filters.ts: NULL means "no posting body was ever fetched and the title
+ * gave nothing away", which is neither a yes nor a no.
  */
 import { and, asc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { companies, jobs } from "../db/schema";
 import { detectCountries } from "./country";
-import { detectWorkAuth, isEntryLevel, isRelevantRole } from "./filters";
+import { classifyEntryLevel, detectWorkAuth, isRelevantRole } from "./filters";
 import { ashbyFinder } from "./ashby";
 import { greenhouseFinder } from "./greenhouse";
 import { sleep } from "./http";
@@ -320,7 +322,10 @@ async function upsertJobs(
       scrapedAt: now,
       lastSeenAt: now,
       active: true,
-      isEntryLevel: isEntryLevel(job.title, description),
+      // Three-valued: null ("we never fetched the body, and the title says
+      // nothing") is stored as NULL rather than being rounded up to `true`,
+      // which is what put "5+ years" postings in front of a new grad.
+      isEntryLevel: classifyEntryLevel(job.title, description),
       isRelevantRole: isRelevantRole(job.title),
       workAuthSignal: detectWorkAuth(`${job.location ?? ""} ${description}`),
       countries: detectCountries(location, description),

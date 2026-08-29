@@ -4,7 +4,8 @@
  *
  *   skip  → at least one hard blocker (wrong country, needs US auth the user
  *           lacks, senior/years requirement, stale/inactive, already applied,
- *           very low fit)
+ *           very low fit) — note `is_entry_level = NULL` is NOT one: unknown
+ *           is not a blocker, it is a caveat
  *   maybe → no blocker but a real caveat (not yet scored, middling fit, aging
  *           posting, onsite outside the user's cities, unknown work-auth on a
  *           US role for a Canadian)
@@ -48,6 +49,13 @@ export const FIT_APPLY_FROM = 55;
 export const STALE_AFTER_DAYS = 45;
 export const AGING_AFTER_DAYS = 21;
 
+/**
+ * The caveat shown for `is_entry_level = NULL` rows — also what
+ * `/jobs`' `level=unknown` view labels them with, so the two never drift.
+ */
+export const ENTRY_LEVEL_UNKNOWN_REASON =
+  "Description not fetched — check the experience requirement on the posting";
+
 const SENIOR_TITLE = /\b(senior|sr\.?|staff|principal|lead|manager|director|head of|vp|chief|architect|distinguished)\b/i;
 
 function countryName(code: CountryCode): string {
@@ -83,6 +91,14 @@ export function assessJob(input: VerdictInput): VerdictResult {
   }
 
   if (job.isEntryLevel === false) push(hard, "Not an entry-level posting");
+  // NULL is "unknown", not "no": the board never gave us a posting body and
+  // the title said nothing either (classifyEntryLevel, src/finders/filters.ts).
+  // That is a caveat for the user to check, never a blocker — hiding these
+  // would throw away real postings, and rounding them UP to entry-level is
+  // what put "5+ years" reqs in front of a new grad in the first place.
+  else if (job.isEntryLevel === null) {
+    push(soft, ENTRY_LEVEL_UNKNOWN_REASON);
+  }
   if (job.isRelevantRole === false) push(hard, "Not a software/engineering role");
   if (SENIOR_TITLE.test(job.title)) push(hard, "Senior-level title");
   const years = analysis?.years_min ?? null;

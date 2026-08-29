@@ -7,6 +7,7 @@ import {
   countryOverlapCondition,
   countryUnknownCondition,
   countsAsApplied,
+  entryLevelCondition,
 } from "../../src/rank/candidates";
 
 const dialect = new PgDialect();
@@ -126,5 +127,16 @@ describe("appliedJobIds", () => {
 
   it("returns an empty set for no rows", () => {
     expect(appliedJobIds([])).toEqual(new Set());
+  });
+});
+
+describe("entryLevelCondition", () => {
+  it("is a plain `= true`, so NULL (unknown) rows never reach the ranker", () => {
+    const { sql: text } = dialect.sqlToQuery(entryLevelCondition());
+    expect(text).toMatch(/"is_entry_level"\s*=\s*true/);
+    // Not `is distinct from false` / `is not false` — those would let
+    // unknown postings through and spend LLM budget on them.
+    expect(text).not.toMatch(/distinct/i);
+    expect(text).not.toMatch(/is not false/i);
   });
 });

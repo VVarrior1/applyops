@@ -95,6 +95,23 @@ export function appliedJobIds<T extends { jobId: string; status: string }>(
 }
 
 /**
+ * `is_entry_level = true`, and nothing else — the ranker spends real LLM
+ * money per job, so it scores only postings we have positive evidence for.
+ *
+ * The column is three-valued (see `classifyEntryLevel` in
+ * src/finders/filters.ts): `true` = the posting body says entry level (or
+ * says nothing disqualifying), `false` = it states a senior/multi-year ask,
+ * `NULL` = no body was ever fetched and the title gave nothing away. SQL
+ * equality drops NULL rows on its own, which is the behaviour wanted here and
+ * the reason this is written as `= true` rather than `is distinct from
+ * false`: an unknown posting is still browsable on `/jobs` under
+ * `level=unknown`, it just doesn't get paid for.
+ */
+export function entryLevelCondition(): SQL {
+  return sql`${jobs.isEntryLevel} = true`;
+}
+
+/**
  * The three candidate-narrowing conditions (spec items 3a–3c), included only
  * when they'd actually narrow anything:
  *

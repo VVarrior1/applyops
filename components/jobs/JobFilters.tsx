@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
+import { SORT_LABELS, SORT_VALUES, type LevelFilter, type SortOption } from "@/src/rank/job-query";
 
 /** "3" | "7" | "14" | "30" (days) or "any" — no lower bound. */
 export type PostedFilter = "3" | "7" | "14" | "30" | "any";
@@ -22,7 +23,23 @@ export interface JobFiltersValue {
   q: string;
   /** Title-vs-role-family filter (src/rank/role-titles.ts) — default "mine" when the user has `prefs.roles` set. */
   roles: RolesFilter;
+  /** Which `is_entry_level` values to show — default "entry" (`= true` only). See src/rank/job-query.ts. */
+  level: LevelFilter;
+  /** Result ordering — default "fit". See src/rank/job-query.ts. */
+  sort: SortOption;
 }
+
+/**
+ * Deliberately worded around what the value MEANS for the reader rather than
+ * around the column: "unknown" is not a third seniority, it's "we never
+ * fetched this posting's body, so nobody has checked its experience
+ * requirement" (src/finders/filters.ts → classifyEntryLevel).
+ */
+const LEVEL_OPTIONS: { value: LevelFilter; label: string }[] = [
+  { value: "entry", label: "Entry-level only" },
+  { value: "unknown", label: "Entry-level + unverified" },
+  { value: "any", label: "Any level" },
+];
 
 const POSTED_OPTIONS: { value: PostedFilter; label: string }[] = [
   { value: "3", label: "3 days" },
@@ -67,10 +84,11 @@ const SELECT_CLASSES =
 
 /**
  * `/jobs`'s filter bar: search, posted-date window, role family, min score,
- * remote, work-auth, vendor, country, and verdict. A plain `method="GET"`
- * form with native form controls — no client JS, same "the URL is the
- * state" approach the `/funnel` page's group-by toggle already uses, just
- * with more fields than a handful of links can express cleanly.
+ * remote, work-auth, vendor, country, experience level, sort order, and
+ * verdict. A plain `method="GET"` form with native form controls — no client
+ * JS, same "the URL is the state" approach the `/funnel` page's group-by
+ * toggle already uses, just with more fields than a handful of links can
+ * express cleanly.
  * `/jobs/page.tsx` reads the resulting `searchParams` and does the actual
  * filtering server-side. The posted-date window also gets its own
  * always-visible line above the form ("Posted within: …") since it's the
@@ -202,6 +220,32 @@ export function JobFilters({
             {userCountries.map((c) => (
               <option key={c.code} value={c.code}>
                 {c.name} ({c.code}) only
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label htmlFor="level" className="text-xs text-muted-foreground">
+            Experience level
+          </label>
+          <select id="level" name="level" defaultValue={value.level} className={SELECT_CLASSES}>
+            {LEVEL_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label htmlFor="sort" className="text-xs text-muted-foreground">
+            Sort by
+          </label>
+          <select id="sort" name="sort" defaultValue={value.sort} className={SELECT_CLASSES}>
+            {SORT_VALUES.map((opt) => (
+              <option key={opt} value={opt}>
+                {SORT_LABELS[opt]}
               </option>
             ))}
           </select>

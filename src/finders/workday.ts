@@ -43,9 +43,6 @@ const WORKDAY_SEARCH_TERMS = ["software", "developer", "data", "graduate", "engi
 const MAX_POSTINGS_PER_TERM = 100;
 /** Hard cap on postings scanned per tenant per run (spec). */
 const MAX_POSTINGS = 300;
-/** Hard cap on posting-detail fetches per tenant per run — bounds a single
- * huge global board (PwC, Manulife, …) to a sane number of extra requests. */
-const MAX_DETAIL_FETCHES = 60;
 /** ≥150 ms between *any* two requests to the same tenant/host (spec). */
 const REQUEST_DELAY_MS = 150;
 
@@ -298,7 +295,6 @@ export async function fetchWorkdayJobs(slug: string): Promise<RawJob[]> {
   }
 
   const jobs: RawJob[] = [];
-  let detailFetches = 0;
 
   for (const posting of postings.slice(0, MAX_POSTINGS)) {
     const title = (posting.title ?? "").trim();
@@ -309,8 +305,7 @@ export async function fetchWorkdayJobs(slug: string): Promise<RawJob[]> {
     const remote = /remote/i.test(`${location ?? ""} ${posting.remoteType ?? ""}`);
 
     let description = title;
-    if (detailFetches < MAX_DETAIL_FETCHES && isRelevantRole(title)) {
-      detailFetches++;
+    if (isRelevantRole(title)) {
       await throttle();
       try {
         const detail = await getJson<WorkdayDetailResponse>(
@@ -334,6 +329,42 @@ export async function fetchWorkdayJobs(slug: string): Promise<RawJob[]> {
     });
   }
   return jobs;
+}
+
+/**
+ * Re-fetches ONE posting's body from its stored `jobs.url`, for
+ * `applyops jobs backfill-descriptions` — the repair path for the rows the
+ * old `MAX_DETAIL_FETCHES` cap left holding nothing but their title.
+ *
+ * The stored URL is exactly `workdayBoardUrl() + externalPath`, so both
+ * halves are recoverable: `parseWorkdayUrl` reads tenant/host/site off the
+ * hostname and path, and whatever follows the site segment is the
+ * `externalPath` the CXS detail endpoint wants. Returns null for a URL that
+ * isn't a Workday board one, and for a posting the board no longer serves —
+ * callers keep the row rather than treating a 404 as "no description".
+ */
+export async function fetchWorkdayDescriptionByUrl(jobUrl: string): Promise<string | null> {
+  const parsed = parseWorkdayUrl(jobUrl);
+  if (!parsed) return null;
+  const { tenant, host, site } = parsed;
+
+  let pathname: string;
+  try {
+    pathname = new URL(jobUrl).pathname;
+  } catch {
+    return null;
+  }
+  const segments = pathname.split("/").filter(Boolean);
+  const siteIndex = segments.indexOf(site);
+  if (siteIndex < 0 || siteIndex === segments.length - 1) return null;
+  const externalPath = `/${segments.slice(siteIndex + 1).join("/")}`;
+
+  const detail = await getJson<WorkdayDetailResponse>(
+    workdayDetailEndpoint(tenant, host, site, externalPath),
+  );
+  const html = detail?.jobPostingInfo?.jobDescription;
+  if (!html) return null;
+  return stripHtml(html) || null;
 }
 
 export const workdayFinder: Finder = { vendor: "workday", fetchJobs: fetchWorkdayJobs };
