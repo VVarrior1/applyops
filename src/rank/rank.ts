@@ -264,7 +264,7 @@ async function upsertJobScore(db: Db, input: UpsertJobScoreInput): Promise<void>
     });
 }
 
-function toFitPrefs(prefs: SearchPrefsRow | null) {
+export function toFitPrefs(prefs: SearchPrefsRow | null) {
   if (!prefs) return null;
   return {
     roles: prefs.roles,

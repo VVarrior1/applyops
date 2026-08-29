@@ -626,3 +626,43 @@ export const usageDaily = pgTable(
   },
   (t) => [primaryKey({ columns: [t.userId, t.date] })],
 );
+
+/**
+ * Every job the alert tiers have already told the owner about, so neither
+ * tier repeats itself.
+ *
+ * Keyed on `externalKey`, not on `jobs.id`: the hourly alerter reads
+ * community-maintained new-grad feeds (`data/alert-sources.json`) whose
+ * postings are not in our `jobs` table at all — they come from
+ * SimplifyJobs' `listings.json` and speedyapply's markdown, not from our own
+ * scrape. A natural key of `<source>:<id>` covers both worlds without forcing
+ * a fake `jobs` row for every third-party listing.
+ *
+ * `channel` distinguishes the two tiers: a job that went out in the 7am
+ * email digest can still earn an SMS later if a *better* signal arrives, and
+ * more importantly the SMS tier must never re-text a job it has already sent.
+ */
+export const jobPings = pgTable(
+  "job_pings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => profiles.userId),
+    /** `<source>:<source's own id>` — e.g. `simplify:20fe605e-9125-…`. */
+    externalKey: text("external_key").notNull(),
+    /** "sms" | "email" — which tier sent it. */
+    channel: text("channel").notNull(),
+    company: text("company").notNull(),
+    title: text("title").notNull(),
+    url: text("url").notNull(),
+    score: integer("score"),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // The dedupe itself. One row per (user, posting, channel); a second send
+    // attempt hits this constraint rather than a second text message.
+    uniqueIndex("job_pings_user_key_channel_uq").on(t.userId, t.externalKey, t.channel),
+    index("job_pings_user_sent_idx").on(t.userId, t.sentAt),
+  ],
+);

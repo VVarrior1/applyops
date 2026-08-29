@@ -1,4 +1,5 @@
 import type { Command } from "commander";
+import { register as registerAlerts } from "./alerts";
 import { register as registerApply } from "./apply";
 import { register as registerBench } from "./bench";
 import { register as registerCompanies } from "./companies";
@@ -18,6 +19,7 @@ import { register as registerWorkday } from "./workday";
  * conflicts between parallel tasks.
  */
 export const registrars: Array<(program: Command) => void> = [
+  registerAlerts,
   registerApply,
   registerBench,
   registerCompanies,

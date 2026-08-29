@@ -1,0 +1,66 @@
+name: Job alerts
+
+# Hourly through the owner's waking hours only: 13:00-05:00 UTC is 07:00-23:00
+# in America/Edmonton. There is no point texting someone at 3am about a job
+# they cannot apply to until morning, and the 07:00 email digest sweeps up
+# anything that appeared overnight.
+on:
+  schedule:
+    - cron: "0 13-23 * * *"
+    - cron: "0 0-5 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Score everything but send no texts"
+        type: boolean
+        required: false
+        default: true
+      threshold:
+        description: "Minimum fit score to text (blank = 75)"
+        required: false
+        default: ""
+
+# An overlapping run would re-read the same feeds and could double-text a
+# posting whose job_pings row the previous run had not yet written.
+concurrency:
+  group: job-alerts
+  cancel-in-progress: false
+
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Dispatch inputs reach the CLI through the environment, never through
+      # `${{ }}` inside the script — interpolating them into the command line
+      # would let an input run arbitrary shell on the runner (same rule as
+      # scrape.yml).
+      - name: Run alerts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_PHONE_NUMBER: ${{ secrets.TWILIO_PHONE_NUMBER }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          THRESHOLD: ${{ inputs.threshold }}
+        run: |
+          args=()
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          if [ -n "$THRESHOLD" ]; then args+=(--threshold "$THRESHOLD"); fi
+          npm run cli -- alerts "${args[@]}"

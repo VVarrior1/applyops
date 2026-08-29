@@ -1,0 +1,34 @@
+{
+  "$comment": [
+    "Community-maintained new-grad job feeds the hourly alerter watches.",
+    "These are the same lists people follow by hand on GitHub; reading them here means a posting",
+    "is judged against the owner's actual resume instead of skimmed off a README.",
+    "",
+    "Prefer `json` sources: SimplifyJobs publishes a typed listings.json with real posted dates,",
+    "active flags and sponsorship, so nothing has to be recovered by parsing a markdown table.",
+    "`markdown` is the fallback for repos (speedyapply) that publish no structured file at all."
+  ],
+  "sources": [
+    {
+      "id": "simplify-newgrad",
+      "kind": "json",
+      "url": "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json",
+      "repo": "SimplifyJobs/New-Grad-Positions",
+      "enabled": true
+    },
+    {
+      "id": "simplify-intern",
+      "kind": "json",
+      "url": "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
+      "repo": "SimplifyJobs/Summer2027-Internships",
+      "enabled": true
+    },
+    {
+      "id": "speedyapply-newgrad",
+      "kind": "markdown",
+      "url": "https://raw.githubusercontent.com/speedyapply/2027-SWE-College-Jobs/main/NEW_GRAD_INTL.md",
+      "repo": "speedyapply/2027-SWE-College-Jobs",
+      "enabled": true
+    }
+  ]
+}
