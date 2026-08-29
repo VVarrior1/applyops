@@ -21,7 +21,8 @@
       "kind": "json",
       "url": "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
       "repo": "SimplifyJobs/Summer2027-Internships",
-      "enabled": true
+      "_disabled_because": "The owner wants permanent new-grad roles only, not internships or co-ops. Kept here rather than deleted so the decision is visible if someone wonders why the obvious feed is missing.",
+      "enabled": false
     },
     {
       "id": "speedyapply-newgrad",

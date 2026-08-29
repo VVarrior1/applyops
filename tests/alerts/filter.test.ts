@@ -6,6 +6,7 @@ import {
   looksEntryLevelTitle,
   hasEntryLevelMarker,
   isFresh,
+  isInternship,
   shortlist,
 } from "@/src/alerts/filter";
 import type { FeedListing } from "@/src/alerts/sources";
@@ -94,7 +95,6 @@ describe("looksEntryLevelTitle", () => {
       "Software Engineer",
       "Software Engineer I",
       "Junior Site Reliability Engineer",
-      "AI Automation Co-op (Fall 2026)",
       "New Grad Software Engineer",
       "Associate Developer",
     ]) {
@@ -106,7 +106,6 @@ describe("looksEntryLevelTitle", () => {
 describe("hasEntryLevelMarker", () => {
   it("spots explicit new-grad wording", () => {
     expect(hasEntryLevelMarker("New Grad Software Engineer")).toBe(true);
-    expect(hasEntryLevelMarker("AI Automation Co-op (Fall 2026)")).toBe(true);
     expect(hasEntryLevelMarker("Junior Developer")).toBe(true);
   });
 });
@@ -190,5 +189,68 @@ describe("isAmbiguousRemote", () => {
   it("does not treat a country-qualified remote as ambiguous", () => {
     expect(isAmbiguousRemote(["Remote in USA"])).toBe(false);
     expect(isAmbiguousRemote(["Remote in Canada"])).toBe(false);
+  });
+});
+
+describe("isInternship — the owner wants permanent new-grad roles only", () => {
+  it("rejects internships, co-ops and work terms", () => {
+    for (const t of [
+      "AI Automation Co-op (Fall 2026)",
+      "Software Engineer Intern",
+      "Web Engineer Intern - Tools & Portals",
+      "Software Engineering Internship (Summer 2027)",
+      "Backend Developer Coop",
+      "Engineering Work Term Student",
+      "Summer Analyst - Technology",
+    ]) {
+      expect(isInternship(t), t).toBe(true);
+    }
+  });
+
+  it("does not mistake permanent roles for internships", () => {
+    for (const t of [
+      "Software Engineer",
+      "New Grad Software Engineer",
+      "Junior Backend Developer",
+      "Software Engineer I",
+      "Associate Data Engineer",
+      // "International" contains "intern" as a substring — must not match.
+      "International Software Engineer",
+    ]) {
+      expect(isInternship(t), t).toBe(false);
+    }
+  });
+
+  it("keeps them out of the shortlist entirely", () => {
+    const coop = {
+      source: "simplify-newgrad",
+      externalKey: "simplify-newgrad:coop",
+      company: "Later",
+      title: "AI Automation Co-op (Fall 2026)",
+      url: "https://example.test/1",
+      locations: ["Vancouver, BC, Canada"],
+      postedAt: new Date("2026-08-29T12:00:00Z"),
+      category: "Software",
+      sponsorship: null,
+    };
+    const out = shortlist([coop], {
+      freshnessHours: 24,
+      alreadySent: new Set<string>(),
+      now: new Date("2026-08-29T18:00:00Z"),
+    });
+    expect(out).toHaveLength(0);
+  });
+});
+
+describe("hasEntryLevelMarker after the new-grad-only change", () => {
+  it("counts new-grad wording", () => {
+    expect(hasEntryLevelMarker("New Grad Software Engineer")).toBe(true);
+    expect(hasEntryLevelMarker("Junior Developer")).toBe(true);
+    expect(hasEntryLevelMarker("Software Engineer I")).toBe(true);
+  });
+
+  it("no longer counts intern or co-op as a new-grad signal", () => {
+    expect(hasEntryLevelMarker("Software Engineer Intern")).toBe(false);
+    expect(hasEntryLevelMarker("AI Automation Co-op (Fall 2026)")).toBe(false);
   });
 });

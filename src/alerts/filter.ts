@@ -112,9 +112,30 @@ export function looksEntryLevelTitle(title: string): boolean {
   return !SENIOR_TITLE.test(title);
 }
 
-/** Positive entry-level markers in a title. Used to rank, not to exclude — many genuine new-grad roles are titled plainly. */
+/**
+ * Internships, co-ops and work terms. A HARD REJECT, not entry-level
+ * evidence: the owner graduates Dec 2026 and wants permanent new-grad roles
+ * only. This distinction is easy to get backwards, because every generic
+ * "entry level" word list groups interns with new grads — the first version
+ * of this file did, and surfaced a "AI Automation Co-op (Fall 2026)".
+ *
+ * "New grad" and "co-op" are different products, not different wordings of
+ * the same one.
+ */
+const INTERNSHIP_TITLE =
+  /\b(intern|interns|internship|co-?op|coop|work term|summer analyst|summer associate|placement student|student position|industrial placement)\b/i;
+
+export function isInternship(title: string): boolean {
+  return INTERNSHIP_TITLE.test(title);
+}
+
+/**
+ * Positive new-grad markers. Used to rank, not to exclude — plenty of genuine
+ * new-grad roles are titled plainly ("Software Engineer"). Deliberately does
+ * NOT include intern/co-op; see {@link isInternship}.
+ */
 const ENTRY_TITLE =
-  /\b(new grad|new graduate|graduate|grad|junior|jr\.?|associate|entry[- ]level|intern|internship|co-?op|university|campus|early career|apprentice|I|1)\b/i;
+  /\b(new grad|new graduate|recent graduate|graduate program|junior|jr\.?|associate|entry[- ]level|university grad|campus hire|early career|apprentice)\b|\b(engineer|developer|analyst)\s+(i|1)\b/i;
 
 export function hasEntryLevelMarker(title: string): boolean {
   return ENTRY_TITLE.test(title);
@@ -148,6 +169,9 @@ export function shortlist(listings: FeedListing[], opts: ShortlistOptions): Feed
   for (const listing of listings) {
     if (opts.alreadySent.has(listing.externalKey)) continue;
     if (!isSoftwareRole(listing)) continue;
+    // Permanent new-grad roles only — an internship or co-op is never wanted,
+    // however good the fit would otherwise be.
+    if (isInternship(listing.title)) continue;
     if (!looksEntryLevelTitle(listing.title)) continue;
     if (!isCanadian(listing.locations) && !isAmbiguousRemote(listing.locations)) continue;
 
