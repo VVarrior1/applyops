@@ -1,0 +1,1 @@
+ALTER TABLE "jobs" ADD COLUMN "source" text DEFAULT 'finder' NOT NULL;

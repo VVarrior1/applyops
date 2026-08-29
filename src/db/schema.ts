@@ -248,6 +248,10 @@ export const jobs = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     // ISO-3166 alpha-2 codes detected from the location (null = not yet detected, [] = unknown/anywhere)
     countries: text("countries").array(),
+    // 'finder' (default — discovered by `runFinders`) | 'manual' (added via
+    // `POST /api/applications/manual` or `applyops outcome add`, tracking an
+    // application made outside the app — src/funnel/manual-application.ts).
+    source: text("source").notNull().default("finder"),
     // Set false by `runFinders` for postings no board has listed for 30 days
     // (spec §6). Rows are never deleted — an application may point at a job
     // that has since been taken down, and the funnel still has to explain it.

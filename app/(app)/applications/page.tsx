@@ -5,6 +5,7 @@ import { getDb } from "@/src/db/client";
 import { applications, companies, jobs, outcomeEvents } from "@/src/db/schema";
 import { OutcomeButtons } from "@/components/applications/OutcomeButtons";
 import { PendingApprovals } from "@/components/applications/PendingApprovals";
+import { AddApplicationDialog } from "@/components/applications/AddApplicationDialog";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -57,6 +58,7 @@ export default async function ApplicationsPage() {
       status: applications.status,
       createdAt: applications.createdAt,
       jobTitle: jobs.title,
+      jobSource: jobs.source,
       companyName: companies.name,
     })
     .from(applications)
@@ -98,16 +100,19 @@ export default async function ApplicationsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-xl font-semibold">Applications</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Everything you have applied to, and anything the apply agent is waiting on. The
-          funnel derived from these events is on the{" "}
-          <a href="/funnel" className="underline underline-offset-2">
-            Funnel
-          </a>{" "}
-          page.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold">Applications</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Everything you have applied to, and anything the apply agent is waiting on. The
+            funnel derived from these events is on the{" "}
+            <a href="/funnel" className="underline underline-offset-2">
+              Funnel
+            </a>{" "}
+            page.
+          </p>
+        </div>
+        <AddApplicationDialog />
       </div>
 
       <PendingApprovals userId={user.id} />
@@ -128,8 +133,13 @@ export default async function ApplicationsPage() {
             {rows.length === 0 && (
               <TableRow>
                 <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  No applications yet — mark a tailored resume as applied from a
-                  job&apos;s Tailor tab.
+                  <div className="flex flex-col items-center gap-3 py-4">
+                    <p>
+                      No applications yet — mark a tailored resume as applied from a job&apos;s
+                      Tailor tab, or add one you applied to elsewhere.
+                    </p>
+                    <AddApplicationDialog variant="outline" />
+                  </div>
                 </TableCell>
               </TableRow>
             )}
@@ -137,7 +147,16 @@ export default async function ApplicationsPage() {
               const lastEvent = lastEventByApplication.get(row.id);
               return (
                 <TableRow key={row.id}>
-                  <TableCell className="font-medium">{row.companyName ?? "—"}</TableCell>
+                  <TableCell className="font-medium">
+                    <span className="flex items-center gap-1.5">
+                      {row.companyName ?? "—"}
+                      {row.jobSource === "manual" && (
+                        <Badge variant="secondary" className="text-[10px]">
+                          manual
+                        </Badge>
+                      )}
+                    </span>
+                  </TableCell>
                   <TableCell className="max-w-60 truncate whitespace-normal">
                     {row.jobTitle}
                   </TableCell>
